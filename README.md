@@ -1,1 +1,1 @@
-# euler-oracle-tools
+# Euler Oracle Tools
