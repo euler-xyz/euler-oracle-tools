@@ -3,13 +3,19 @@ import { Contract, providers, BigNumber, utils, constants } from "ethers";
 const c1e18 = BigNumber.from(10).pow(18);
 const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
 const UNISWAP_QUOTERV2_ADDRESS = '0x0209c4Dc18B2A1439fD2427E34E7cF3c6B91cFB9';
+const FACTORY_ADDRESS = '0x1F98431c8aD98523631AE4a59f267346ea31F984'
+const POOL_INIT_CODE_HASH = '0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54'
+
 const provider = new providers.JsonRpcProvider(process.env.REACT_APP_ETHEREUM_HTTP);
-const abi = [
+const quoterAbi = [
   'function quoteExactInputSingle(tuple(address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) public returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
 ];
+const poolAbi = [
+  'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)'
+]
 const quoterContract = new Contract(
   UNISWAP_QUOTERV2_ADDRESS,
-  abi,
+  quoterAbi,
   provider,
 );
 
@@ -22,23 +28,19 @@ export const sqrtPriceX96ToPrice = (a, invert) => {
 }
 
 export const getCurrPrice = async (market, fee) => {
-  if (market.underlying.toLowerCase() === WETH_ADDRESS) return { pump: '0', dump: '0' };
+  if (market.underlying.toLowerCase() === WETH_ADDRESS) return BigNumber.from(1);
   try {
-    let inverted = BigNumber.from(market.underlying).gt(WETH_ADDRESS);
-    let quote;
+    const inverted = BigNumber.from(market.underlying).gt(WETH_ADDRESS);
+    const pool = new Contract(
+      computeUniV3PoolAddress(market.underlying, WETH_ADDRESS, fee),
+      poolAbi,
+      provider,
+    );
 
-    quote = await quoterContract.callStatic.quoteExactInputSingle({
-      tokenIn: market.underlying,
-      tokenOut: WETH_ADDRESS,
-      fee,
-      amountIn: 1,
-      sqrtPriceLimitX96: 0,
-    });
-
-    return sqrtPriceX96ToPrice(quote.sqrtPriceX96After, inverted)
+    const quote = await pool.slot0();
+    return sqrtPriceX96ToPrice(quote.sqrtPriceX96, inverted)
   } catch (e) {
-    console.log('e: ', market.symbol, e);
-    // if (market.symbol !== 'renDOGE') sendAlert("uniswapMarkets : " + e.toString())
+    console.log('current price: ', market.symbol, e);
   }
 }
 
@@ -66,7 +68,7 @@ export const getDump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
     }
   } catch (e) {
     console.log('e: ', market.symbol, e);
-    // if (market.symbol !== 'renDOGE') sendAlert("uniswapMarkets : " + e.toString())
+    throw e;
   }
 }
 
@@ -95,7 +97,7 @@ export const getPump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
     }
   } catch (e) {
     console.log('e: ', market.symbol, e);
-    // if (market.symbol !== 'renDOGE') sendAlert("uniswapMarkets : " + e.toString())
+    throw e;
   }
 }
 
@@ -218,3 +220,15 @@ export const numberFormatText = (num, noAbbrev = false) => {
 
 export const formatPrice = (price, token) =>
  utils.formatEther(price.div(BigNumber.from(10).pow(18 - token.decimals)));
+
+ export function computeUniV3PoolAddress(tokenA, tokenB, fee) {
+  const [token0, token1] = BigNumber.from(tokenA).lt(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA]
+  return utils.getCreate2Address(
+    FACTORY_ADDRESS,
+    utils.solidityKeccak256(
+      ['bytes'],
+      [utils.defaultAbiCoder.encode(['address', 'address', 'uint24'], [token0, token1, fee])]
+    ),
+    POOL_INIT_CODE_HASH
+  )
+}

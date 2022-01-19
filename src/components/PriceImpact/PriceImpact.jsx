@@ -114,7 +114,8 @@ export const PriceImpact = () => {
         underlying: token.address,
         decimals: token.decimals,
       }
-      const res = await Promise.all(amountsUSD.map(a => getPumpAndDump(currPrice, market, fee, ethPrice, a)));
+      let res = await Promise.allSettled(amountsUSD.map(a => getPumpAndDump(currPrice, market, fee, ethPrice, a)));
+      res = res.filter(r => r.status === 'fulfilled').map(r => r.value);
       setTrades(res);
     }
     exec();
