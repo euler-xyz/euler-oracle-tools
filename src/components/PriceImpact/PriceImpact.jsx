@@ -394,8 +394,8 @@ export const PriceImpact = () => {
           Download csv
         </Button>
         <CSVLink
-          headers={['VALUE', 'PUMP', 'DUMP']}
-          data={trades.map(({pump, dump}) => [pump.value, pump, dump])}
+          headers={['VALUE', 'PUMP PRICE IMPACT', 'PUMP PRICE', 'DUMP PRICE IMPACT', 'DUMP PRICE']}
+          data={trades.map(({pump, dump}) => [pump.value, pump.priceImpact, pump.price, dump.priceImpact, dump.price])}
           target="_blank"
           filename={`${symbol}_${fee}.csv`}
           ref={csvLink}

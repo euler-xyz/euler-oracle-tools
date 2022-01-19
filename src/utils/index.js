@@ -1,4 +1,4 @@
-import { Contract, providers, BigNumber, utils, ethers } from "ethers";
+import { Contract, providers, BigNumber, utils, constants } from "ethers";
 
 const c1e18 = BigNumber.from(10).pow(18);
 const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
@@ -32,7 +32,7 @@ export const getCurrPrice = async (market, fee) => {
       tokenOut: WETH_ADDRESS,
       fee,
       amountIn: 1,
-      sqrtPriceLimitX96: 0
+      sqrtPriceLimitX96: 0,
     });
 
     return sqrtPriceX96ToPrice(quote.sqrtPriceX96After, inverted)
