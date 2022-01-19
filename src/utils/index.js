@@ -157,12 +157,16 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
       }));
 
       points = [low, ...points, high];
+
+      let found = false;
       [currOutcome, tradeValue, low, high] = res.reduce((accu, r, i) => {
         if (!accu[0] || Math.abs(r[targetType] - target) < Math.abs(accu[0][targetType] - target)) {
-          return [r, points[i + 1], points[i], points[i + 2] || high]
+          found = true;
+          return [r, points[i + 1], points[i], points[i + 2]]
         }
         return accu;
-      }, [currOutcome, tradeValue, low, high]);
+      }, []);
+      if (!found) throw "Improvement not found";
     }
   
     return { value: tradeValue, ...currOutcome};
@@ -213,4 +217,4 @@ export const numberFormatText = (num, noAbbrev = false) => {
 }
 
 export const formatPrice = (price, token) =>
-  numberFormatText(utils.formatEther(price.div(BigNumber.from(10).pow(18 - token.decimals))), true);
+ utils.formatEther(price.div(BigNumber.from(10).pow(18 - token.decimals)));
