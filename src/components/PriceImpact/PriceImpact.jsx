@@ -32,7 +32,7 @@ import { getCurrPrice, getPumpAndDump, numberFormatText, binarySearchTradeValues
 
 export const PriceImpact = () => {
   const [tokenList, setTokenList] = useState([]);
-  const [symbol, setSymbol] = useState('FLOAT');
+  const [symbol, setSymbol] = useState('USDC');
   const [fee, setFee] = useState(3000);
   const [ethPrice, setEthPrice] = useState(0);
   const [trades, setTrades] = useState();
@@ -136,6 +136,7 @@ export const PriceImpact = () => {
       }
       let res = await Promise.allSettled(amountsUSD.map(a => getPumpAndDump(currPrice, market, fee, ethPrice, a)));
       res = res.filter(r => r.status === 'fulfilled').map(r => r.value);
+      console.log('res: ', res);
       setTrades({
         pump: res.map(r => r.pump),
         dump: res.map(r => r.dump),
@@ -245,27 +246,12 @@ export const PriceImpact = () => {
     setTargetPriceImpact(event.target.value);
   }
 
-  let pumpChartData = trades && trades.pump.map(s => ({...s, priceImpact: Math.floor(s.priceImpact * 100) / 100})) || [];
-  let dumpChartData = trades && trades.dump.map(s => ({...s, priceImpact: Math.floor(s.priceImpact * 100) / 100})) || [];
-
-  // if (targetPriceImpactValue) {
-  //   pumpChartData.push(targetPriceImpactValue.pump);
-  //   dumpChartData.push(targetPriceImpactValue.dump);
-  //   pumpChartData = sortBy(pumpChartData, ['value']);
-  //   dumpChartData = sortBy(dumpChartData, ['vaue']);
-  // }
-
-  if (targetPriceValue) {
-    if (targetPriceValue.pump) {
-      pumpChartData.push(targetPriceValue.pump);
-      pumpChartData = sortBy(pumpChartData, ['value']);
-    }
-    if (targetPriceValue.dump) {
-      dumpChartData.push({...targetPriceValue.dump, priceImpact: -1 * targetPriceValue.dump.priceImpact});
-      dumpChartData = sortBy(dumpChartData, ['value']);
-    }
+  const stringToFixed = (val, precision) => {
+    const i = val.indexOf('.')
+    return Number(i === -1 ? val : val.slice(0, i + precision + 1))
   }
-  
+  let pumpChartData = trades && trades.pump.map(s => ({...s, priceImpact: stringToFixed(s.priceImpact, 3) })) || [];
+  let dumpChartData = trades && trades.dump.map(s => ({...s, priceImpact: stringToFixed(s.priceImpact, 3) })) || [];
 
   const tokenSelectOptions = tokenList.map((t, i) => ({
     ...t,

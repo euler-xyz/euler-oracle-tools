@@ -69,7 +69,11 @@ export const getPoolFees = async (address) => {
 }
 
 export const getDump = async (currPrice, market, fee, ethPrice, tradeValueInUSD) => {
-  if (market.underlying.toLowerCase() === WETH_ADDRESS) return { value: '0', price: '0', priceImpact: '0' };
+  if (
+    market.underlying.toLowerCase() === WETH_ADDRESS ||
+    currPrice.eq(0)
+  ) return { value: tradeValueInUSD, price: '0', priceImpact: '0' };
+
   try {
     let inverted = BigNumber.from(market.underlying).gt(WETH_ADDRESS);
     let quote;
@@ -97,7 +101,11 @@ export const getDump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
 }
 
 export const getPump = async (currPrice, market, fee, ethPrice, tradeValueInUSD) => {
-  if (market.underlying.toLowerCase() === WETH_ADDRESS) return { value: '0', price: '0', priceImpact: '0' };
+  if (
+    market.underlying.toLowerCase() === WETH_ADDRESS ||
+    currPrice.eq(0)
+  ) return { value: tradeValueInUSD, price: '0', priceImpact: '0' };
+
   try {
     let inverted = BigNumber.from(market.underlying).gt(WETH_ADDRESS);
     let quote;
@@ -177,7 +185,7 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
       if (isCancelled) throw new Error('cancelled');
 
       let ticks = Array(ranges - 1).fill(null).map((_, i) => low + (high - low) / ranges * (i + 1));
-      console.log(direction, 'ticks: ', ticks);
+      if (direction === 'dump') console.log(direction, 'ticks: ', ticks);
 
       const samples = await Promise.all(ticks.map(async (tick, index) => {
         const trade = await getTrade(currPrice, market, fee, ethPrice, tick);
@@ -192,17 +200,17 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
 
       best = samples.reduce((accu, s, i) => {
         if (Math.abs(s[targetType] - target) < Math.abs(accu[targetType] - target)) {
-          console.log(direction, 'found:', s)
+          if (direction === 'dump') console.log(direction, 'found:', s)
           return s;
         }
         return accu;
       });
-      console.log(direction, 'best: ', best);
+      if (direction === 'dump') console.log(direction, 'best: ', best);
       
       // no improvement after the first sample - go down the left
       if (best.index === 0) { 
         high = ticks[1];
-        console.log(direction, 'low high: ', low, high);
+        if (direction === 'dump') console.log(direction, 'low high: ', low, high);
         continue;
       }
       
@@ -213,14 +221,14 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
         }
       }
       high = ticks[best.index + 1] || high;
-      console.log(direction, 'low high: ', low, high);
+      if (direction === 'dump') console.log(direction, 'low high: ', low, high);
     }
 
     allTrades = sortBy(allTrades, 'value');
    
     // take the best trade above target
     best = allTrades.find(t => Math.abs(t[targetType]) > target);
-    console.log('RESULT', best);
+    if (direction === 'dump') console.log('RESULT', best);
     return {
       best,
       // include trades below and a few over
