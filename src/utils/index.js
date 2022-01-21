@@ -1,9 +1,12 @@
+/* eslint-disable */
+
 import { Contract, providers, BigNumber, utils, constants } from "ethers";
+import { sortBy } from "lodash";
 
 const c1e18 = BigNumber.from(10).pow(18);
 const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
 const UNISWAP_QUOTERV2_ADDRESS = '0x0209c4Dc18B2A1439fD2427E34E7cF3c6B91cFB9';
-const FACTORY_ADDRESS = '0x1F98431c8aD98523631AE4a59f267346ea31F984'
+const UNISWAP_FACTORY_ADDRESS = '0x1F98431c8aD98523631AE4a59f267346ea31F984'
 const POOL_INIT_CODE_HASH = '0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54'
 
 const provider = new providers.JsonRpcProvider(process.env.REACT_APP_ETHEREUM_HTTP);
@@ -13,9 +16,17 @@ const quoterAbi = [
 const poolAbi = [
   'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)'
 ]
+const factoryAbi = [
+  'function getPool(address token0, address token1, uint24 fee) public view returns (address)',
+]
 const quoterContract = new Contract(
   UNISWAP_QUOTERV2_ADDRESS,
   quoterAbi,
+  provider,
+);
+const factoryContract = new Contract(
+  UNISWAP_FACTORY_ADDRESS,
+  factoryAbi,
   provider,
 );
 
@@ -44,8 +55,21 @@ export const getCurrPrice = async (market, fee) => {
   }
 }
 
+export const getPoolFees = async (address) => {
+  const [token0, token1] = BigNumber.from(address).gt(WETH_ADDRESS)
+    ? [WETH_ADDRESS, address]
+    : [address, WETH_ADDRESS];
+
+  const pools = await Promise.all([100, 500, 3000, 10000].map(async fee => {
+    const pool = await factoryContract.getPool(token0, token1, fee);
+    if (pool !== constants.AddressZero) return fee;
+  }));
+
+  return pools.filter(Boolean);
+}
+
 export const getDump = async (currPrice, market, fee, ethPrice, tradeValueInUSD) => {
-  if (market.underlying.toLowerCase() === WETH_ADDRESS) return '0';
+  if (market.underlying.toLowerCase() === WETH_ADDRESS) return { value: '0', price: '0', priceImpact: '0' };
   try {
     let inverted = BigNumber.from(market.underlying).gt(WETH_ADDRESS);
     let quote;
@@ -55,7 +79,7 @@ export const getDump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
       tokenIn: market.underlying,
       tokenOut: WETH_ADDRESS,
       fee,
-      amountIn: amountIn,
+      amountIn,
       sqrtPriceLimitX96: 0
     });
     let after = sqrtPriceX96ToPrice(quote.sqrtPriceX96After, inverted);
@@ -73,7 +97,7 @@ export const getDump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
 }
 
 export const getPump = async (currPrice, market, fee, ethPrice, tradeValueInUSD) => {
-  if (market.underlying.toLowerCase() === WETH_ADDRESS) return '0';
+  if (market.underlying.toLowerCase() === WETH_ADDRESS) return { value: '0', price: '0', priceImpact: '0' };
   try {
     let inverted = BigNumber.from(market.underlying).gt(WETH_ADDRESS);
     let quote;
@@ -83,7 +107,7 @@ export const getPump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
       tokenIn: WETH_ADDRESS,
       tokenOut: market.underlying,
       fee,
-      amountIn: amountIn,
+      amountIn,
       sqrtPriceLimitX96: 0
     });
 
@@ -109,11 +133,11 @@ export const getPumpAndDump = async (currPrice, market, fee, ethPrice, tradeValu
   return { pump, dump };
 }
 
-export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType, pumpOrDump) => {
+export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType, direction) => {
   let currPriceFormatted = formatPrice(currPrice, market);
   if (
     targetType === 'price' &&
-    (pumpOrDump === 'pump' && target <= currPriceFormatted || pumpOrDump === 'dump' && target >= currPriceFormatted)
+    (direction === 'pump' && target <= currPriceFormatted || direction === 'dump' && target >= currPriceFormatted)
   ) return [];
 
   let isCancelled = false
@@ -124,54 +148,84 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
   const exec = async () => {
     let high = 1_000_000_000;
     let low = 0;
-    let currOutcome;
-    let tolerance = target / 100;
-    let ranges = 20;
-    let factor = 2;
 
-    const getTrade = pumpOrDump === 'pump' ? getPump : getDump;
+    let tolerance = 0.01;
+    let ranges = 20;
+    let allTrades = []
     
-    // while (currOutcome < target) {
+    let best;
+   
+    const getTrade = direction === 'pump' ? getPump : getDump;
+    
+    // while (best < target) {
     //     if (isCancelled) throw 'cancelled';
     //     high = high * factor;
-    //     currOutcome = Math.abs(await getTrade(currPrice, market, fee, ethPrice, high));
+    //     best = Math.abs(await getTrade(currPrice, market, fee, ethPrice, high));
     //     factor += 1;
     //   }
       
     // low = high === 100000 * 2 ? 0 : high / (factor - 1);
-
+    // Math.abs(best[targetType] - target) > tolerance
       
     high = 1_000_000_000;
     low = 0;
     let tradeValue = -1;
-    while (!currOutcome || Math.abs(currOutcome[targetType] - target) > tolerance) {
+    while (high - low > high * tolerance) {
+
       console.log('searching...');
-      if (isCancelled) throw 'cancelled';
+      
+      if (isCancelled) throw new Error('cancelled');
 
-      let points = Array(ranges - 1).fill(null).map((_, i) => low + (high - low) / ranges * (i + 1));
+      let ticks = Array(ranges - 1).fill(null).map((_, i) => low + (high - low) / ranges * (i + 1));
+      console.log(direction, 'ticks: ', ticks);
 
-      const res = await Promise.all(points.map(async (point) => {
-        const trade = await getTrade(currPrice, market, fee, ethPrice, point);
+      const samples = await Promise.all(ticks.map(async (tick, index) => {
+        const trade = await getTrade(currPrice, market, fee, ethPrice, tick);
+        allTrades.push(trade);
         return {
           priceImpact: Math.abs(trade.priceImpact),
           price: trade.price,
+          value: tick,
+          index,
         };
       }));
 
-      points = [low, ...points, high];
-
-      let found = false;
-      [currOutcome, tradeValue, low, high] = res.reduce((accu, r, i) => {
-        if (!accu[0] || Math.abs(r[targetType] - target) < Math.abs(accu[0][targetType] - target)) {
-          found = true;
-          return [r, points[i + 1], points[i], points[i + 2]]
+      best = samples.reduce((accu, s, i) => {
+        if (Math.abs(s[targetType] - target) < Math.abs(accu[targetType] - target)) {
+          console.log(direction, 'found:', s)
+          return s;
         }
         return accu;
-      }, []);
-      if (!found) throw "Improvement not found";
+      });
+      console.log(direction, 'best: ', best);
+      
+      // no improvement after the first sample - go down the left
+      if (best.index === 0) { 
+        high = ticks[1];
+        console.log(direction, 'low high: ', low, high);
+        continue;
+      }
+      
+      // otherwise make sure to have the cliff in range
+      for (let j = 0; j < best.index; j++) {
+        if (samples[j].priceImpact < best.priceImpact) {
+          low = ticks[j];
+        }
+      }
+      high = ticks[best.index + 1] || high;
+      console.log(direction, 'low high: ', low, high);
     }
-  
-    return { value: tradeValue, ...currOutcome};
+
+    allTrades = sortBy(allTrades, 'value');
+   
+    // take the best trade above target
+    best = allTrades.find(t => Math.abs(t[targetType]) > target);
+    console.log('RESULT', best);
+    return {
+      best,
+      // include trades below and a few over
+      trades: allTrades.filter(t => t.value < Math.max(10_000_000, best.value * 1.2))
+    };
   }
   return [exec(), cancel];
 }
@@ -224,7 +278,7 @@ export const formatPrice = (price, token) =>
  export function computeUniV3PoolAddress(tokenA, tokenB, fee) {
   const [token0, token1] = BigNumber.from(tokenA).lt(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA]
   return utils.getCreate2Address(
-    FACTORY_ADDRESS,
+    UNISWAP_FACTORY_ADDRESS,
     utils.solidityKeccak256(
       ['bytes'],
       [utils.defaultAbiCoder.encode(['address', 'address', 'uint24'], [token0, token1, fee])]

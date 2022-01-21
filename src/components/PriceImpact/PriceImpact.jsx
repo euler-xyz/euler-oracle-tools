@@ -26,19 +26,20 @@ import { DefaultTooltipContent } from 'recharts/lib/component/DefaultTooltipCont
 import { sortBy } from "lodash";
 import { matchSorter } from "match-sorter";
 
-import { getCurrPrice, getPumpAndDump, numberFormatText, binarySearchTradeValues, formatPrice } from '../../utils';
+import { getCurrPrice, getPumpAndDump, numberFormatText, binarySearchTradeValues, formatPrice, getPoolFees } from '../../utils';
 
 
 
 export const PriceImpact = () => {
   const [tokenList, setTokenList] = useState([]);
-  const [symbol, setSymbol] = useState('USDC');
+  const [symbol, setSymbol] = useState('FLOAT');
   const [fee, setFee] = useState(3000);
   const [ethPrice, setEthPrice] = useState(0);
-  const [trades, setTrades] = useState([]);
+  const [trades, setTrades] = useState();
   const [currPrice, setCurrPrice] = useState();
+  const [poolFees, setPoolFees] = useState([]);
 
-  const [targetPriceImpact, setTargetPriceImpact] = useState(50);
+  const [targetPriceImpact, setTargetPriceImpact] = useState(90);
   const [targetPriceImpactLoading, setTargetPriceImpactLoading] = useState(false);
   const [targetPriceImpactValue, setTargetPriceImpactValue] = useState();
 
@@ -51,7 +52,7 @@ export const PriceImpact = () => {
 
   const cancelPriceImpactSearch = useRef(() => {});
   const cancelPriceSearch = useRef(() => {});
-  const csvLink = useRef()
+  const csvLink = useRef();
 
   const amountsUSD = [
     100_000,
@@ -77,19 +78,38 @@ export const PriceImpact = () => {
   
   const getToken = () => tokenList.find(t => t.symbol === symbol);
 
+  const getStandardTrades = () => {
+    return amountsUSD.map(a => {
+      const pump = trades.pump.find(t => t.value === a);
+      const dump = trades.dump.find(t => t.value === a);
+      return { pump, dump };
+    })
+  }
+
   useEffect(() => {
     Promise.all([
       axios.get('https://raw.githubusercontent.com/euler-xyz/euler-tokenlist/master/euler-tokenlist.json'),
       axios.get('https://min-api.cryptocompare.com/data/price?fsym=ETH&tsyms=USD'),
     ])
     .then(([result1, result2]) => {
-      setTokenList(sortBy(result1.data.tokens.filter(t => t.symbol !== 'LTO'), 'symbol'));
+      setTokenList(sortBy(result1.data.tokens, 'symbol'));
       setEthPrice(Number(result2.data.USD));
     });
   }, []);
 
+
   useEffect(() => {
     if (!tokenList.length || !ethPrice) return;
+    const token = getToken();
+
+    getPoolFees(token.address).then(fees => {
+      setPoolFees(fees);
+      setFee(fees.includes(3000) ? 3000 : fees[0]);
+    });
+  }, [symbol, tokenList, ethPrice]);
+
+  useEffect(() => {
+    if (!tokenList.length || !ethPrice || !poolFees.includes(fee)) return;
     const token = getToken();
     const market = {
       symbol,
@@ -102,12 +122,12 @@ export const PriceImpact = () => {
       setTargetETHPrice(formatPrice(price, getToken()));
       setTargetUSDPrice(formatPrice(price, getToken()) * ethPrice);
     });
-  }, [symbol, fee, tokenList, ethPrice]);
+  }, [symbol, fee, poolFees, tokenList, ethPrice]);
 
   useEffect(() => {
-    if (!tokenList.length || !ethPrice || !currPrice) return;
+    if (!tokenList.length || !ethPrice || !currPrice || !poolFees.includes(fee)) return;
     const exec = async () => {
-      setTrades([]);
+      setTrades();
       const token = getToken();
       const market = {
         symbol,
@@ -116,10 +136,13 @@ export const PriceImpact = () => {
       }
       let res = await Promise.allSettled(amountsUSD.map(a => getPumpAndDump(currPrice, market, fee, ethPrice, a)));
       res = res.filter(r => r.status === 'fulfilled').map(r => r.value);
-      setTrades(res);
+      setTrades({
+        pump: res.map(r => r.pump),
+        dump: res.map(r => r.dump),
+      });
     }
     exec();
-  }, [symbol, fee, tokenList, ethPrice, currPrice && currPrice.toString()]);
+  }, [symbol, fee, poolFees, tokenList, ethPrice, currPrice && currPrice.toString()]);
 
   const onTargetPriceImpact = () => {
     cancelPriceImpactSearch.current();
@@ -137,7 +160,11 @@ export const PriceImpact = () => {
 
     promise
       .then(([pump, dump]) => {
-        setTargetPriceImpactValue({pump, dump: {...dump, priceImpact: -1 * dump.priceImpact}});
+        setTargetPriceImpactValue({pump: pump.best, dump: dump.best});
+        setTrades({
+          pump: sortBy(trades.pump.concat(pump.trades), 'value'), 
+          dump: sortBy(trades.dump.concat(dump.trades), 'value'), 
+        })
         setTargetPriceImpactLoading(false);
       })
       .catch(e => {
@@ -162,29 +189,37 @@ export const PriceImpact = () => {
 
     promise
       .then(([pump, dump]) => {
-        setTargetPriceValue({pump, dump});
+        setTargetPriceValue({pump: pump && pump.best, dump: dump && dump.best});
+        setTrades({
+          pump: sortBy(trades.pump.concat(pump ? pump.trades : []), 'value'), 
+          dump: sortBy(trades.dump.concat(dump ? dump.trades : []), 'value'), 
+        })
         setTargetPriceLoading(false);
       })
       .catch(e => {
+        setTargetPriceLoading(false);
         if (e !== 'cancelled') throw e;
       })
+
     return () => cancelPriceSearch.current();
   };
 
-  const resetTrades = () => {
+  const resetMarket = () => {
     setCurrPrice(null);
-    setTrades([]);
+    setTrades();
     setTargetPriceImpactValue(null);
     setTargetPriceValue(null);
+    setFee(3000);
+    setPoolFees([]);
   }
   const handleToken = (option) => {
     if (!option) return;
-    resetTrades();
+    resetMarket();
     setSymbol(option.symbol);
   };
 
   const handleFee = (event) => {
-    resetTrades();
+    resetMarket();
     setFee(event.target.value);
   };
 
@@ -210,15 +245,15 @@ export const PriceImpact = () => {
     setTargetPriceImpact(event.target.value);
   }
 
-  let pumpChartData = trades.map(s => ({...s.pump, priceImpact: Math.floor(s.pump.priceImpact * 100) / 100}));
-  let dumpChartData = trades.map(s => ({...s.dump, priceImpact: Math.floor(s.dump.priceImpact * 100) / 100}));
+  let pumpChartData = trades && trades.pump.map(s => ({...s, priceImpact: Math.floor(s.priceImpact * 100) / 100})) || [];
+  let dumpChartData = trades && trades.dump.map(s => ({...s, priceImpact: Math.floor(s.priceImpact * 100) / 100})) || [];
 
-  if (targetPriceImpactValue) {
-    pumpChartData.push(targetPriceImpactValue.pump);
-    dumpChartData.push(targetPriceImpactValue.dump);
-    pumpChartData = sortBy(pumpChartData, ['value']);
-    dumpChartData = sortBy(dumpChartData, ['vaue']);
-  }
+  // if (targetPriceImpactValue) {
+  //   pumpChartData.push(targetPriceImpactValue.pump);
+  //   dumpChartData.push(targetPriceImpactValue.dump);
+  //   pumpChartData = sortBy(pumpChartData, ['value']);
+  //   dumpChartData = sortBy(dumpChartData, ['vaue']);
+  // }
 
   if (targetPriceValue) {
     if (targetPriceValue.pump) {
@@ -290,10 +325,10 @@ export const PriceImpact = () => {
                 label="Fee"
                 onChange={handleFee}
               >
-                <MenuItem value={100} key={100}>0.01%</MenuItem>
-                <MenuItem value={500} key={500}>0.05%</MenuItem>
-                <MenuItem value={3000} key={3000}>0.3%</MenuItem>
-                <MenuItem value={10000} key={10000}>1%</MenuItem>
+                <MenuItem value={100} key={100} disabled={!poolFees.includes(100)}>0.01%</MenuItem>
+                <MenuItem value={500} key={500} disabled={!poolFees.includes(500)}>0.05%</MenuItem>
+                <MenuItem value={3000} key={3000} disabled={!poolFees.includes(3000)}>0.3%</MenuItem>
+                <MenuItem value={10000} key={10000} disabled={!poolFees.includes(10000)}>1%</MenuItem>
               </Select>
             </FormControl>
           </Box>
@@ -387,22 +422,24 @@ export const PriceImpact = () => {
           </Box>
         <Button
           sx={{ minWidth: 120, width: 200, margin: 1, }}
-          disabled={!trades.length}
+          disabled={!trades}
           variant="contained"
           endIcon={<DownloadIcon />}
           onClick={handleDownload}
         >
           Download csv
         </Button>
-        <CSVLink
-          headers={['VALUE', 'PUMP PRICE IMPACT', 'PUMP PRICE', 'DUMP PRICE IMPACT', 'DUMP PRICE']}
-          data={trades.map(({pump, dump}) => [pump.value, pump.priceImpact, pump.price, dump.priceImpact, dump.price])}
-          target="_blank"
-          filename={`${symbol}_${fee}.csv`}
-          ref={csvLink}
-        />
+        {trades && (
+          <CSVLink
+            headers={['VALUE', 'PUMP PRICE IMPACT', 'PUMP PRICE', 'DUMP PRICE IMPACT', 'DUMP PRICE']}
+            data={getStandardTrades().map(({ pump, dump }) => [pump.value, pump.priceImpact, pump.price, dump.priceImpact, dump.price])}
+            target="_blank"
+            filename={`${symbol}_${fee}.csv`}
+            ref={csvLink}
+          />
+        )}
       </Box>
-      {trades.length
+      {trades
         ? (
           <>
             <Box display="flex" flexDirection="column">
@@ -424,7 +461,7 @@ export const PriceImpact = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {trades.map((row) => (
+                      {getStandardTrades().map((row) => (
                         <TableRow
                           key={row.pump.value}
                           sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
