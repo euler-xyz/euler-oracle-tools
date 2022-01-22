@@ -19,12 +19,19 @@ import DownloadIcon from '@mui/icons-material/Download';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import CircularProgress from '@mui/material/CircularProgress';
 import Autocomplete from '@mui/material/Autocomplete';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogContentText from '@mui/material/DialogContentText';
+import DialogTitle from '@mui/material/DialogTitle';
 
 import { CSVLink } from "react-csv";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, } from 'recharts';
 import { DefaultTooltipContent } from 'recharts/lib/component/DefaultTooltipContent';
 import { sortBy } from "lodash";
 import { matchSorter } from "match-sorter";
+import { Decimal } from 'decimal.js'
+import { utils } from 'ethers'
 
 import { getCurrPrice, getPumpAndDump, numberFormatText, binarySearchTradeValues, formatPrice, getPoolFees } from '../../utils';
 
@@ -32,7 +39,7 @@ import { getCurrPrice, getPumpAndDump, numberFormatText, binarySearchTradeValues
 
 export const PriceImpact = () => {
   const [tokenList, setTokenList] = useState([]);
-  const [symbol, setSymbol] = useState('USDC');
+  const [symbol, setSymbol] = useState('FLOAT');
   const [fee, setFee] = useState(3000);
   const [ethPrice, setEthPrice] = useState(0);
   const [trades, setTrades] = useState();
@@ -42,16 +49,25 @@ export const PriceImpact = () => {
   const [targetPriceImpact, setTargetPriceImpact] = useState(90);
   const [targetPriceImpactLoading, setTargetPriceImpactLoading] = useState(false);
   const [targetPriceImpactValue, setTargetPriceImpactValue] = useState();
-
+  
   const [targetETHPrice, setTargetETHPrice] = useState('');
   const [targetUSDPrice, setTargetUSDPrice] = useState('');
   const [targetPriceLoading, setTargetPriceLoading] = useState(false);
   const [targetPriceValue, setTargetPriceValue] = useState();
+  
+  const [window, setWindow] = useState(144);
+  const [attackBlocks, setAttackBlocks] = useState(1);
+  const [targetETHTWAP, setTargetETHTWAP] = useState('');
+  const [targetUSDTWAP, setTargetUSDTWAP] = useState('');
+  const [targetTWAPLoading, setTargetTWAPLoading] = useState(false);
+  const [targetTWAPValue, setTargetTWAPValue] = useState();
 
-
+  const [error, setError] = useState();
+  const [errorOpen, setErrorOpen] = useState(false);
 
   const cancelPriceImpactSearch = useRef(() => {});
   const cancelPriceSearch = useRef(() => {});
+  const cancelTWAPSearch = useRef(() => {});
   const csvLink = useRef();
 
   const amountsUSD = [
@@ -121,6 +137,8 @@ export const PriceImpact = () => {
       setCurrPrice(price);
       setTargetETHPrice(formatPrice(price, getToken()));
       setTargetUSDPrice(formatPrice(price, getToken()) * ethPrice);
+      setTargetETHTWAP(formatPrice(price, getToken()));
+      setTargetUSDTWAP(formatPrice(price, getToken()) * ethPrice);
     });
   }, [symbol, fee, poolFees, tokenList, ethPrice]);
 
@@ -136,7 +154,7 @@ export const PriceImpact = () => {
       }
       let res = await Promise.allSettled(amountsUSD.map(a => getPumpAndDump(currPrice, market, fee, ethPrice, a)));
       res = res.filter(r => r.status === 'fulfilled').map(r => r.value);
-      console.log('res: ', res);
+
       setTrades({
         pump: res.map(r => r.pump),
         dump: res.map(r => r.dump),
@@ -148,7 +166,7 @@ export const PriceImpact = () => {
   const onTargetPriceImpact = () => {
     cancelPriceImpactSearch.current();
 
-    setTargetPriceImpactValue(null);
+    // setTargetPriceImpactValue(null);
     setTargetPriceImpactLoading(true);
     const token = getToken();
     const market = {
@@ -156,7 +174,9 @@ export const PriceImpact = () => {
       underlying: token.address,
       decimals: token.decimals,
     }
-    const { promise, cancel } = binarySearchTradeValues(currPrice, market, fee, ethPrice, targetPriceImpact, 'priceImpact');
+
+    const targetDecimal = new Decimal(targetPriceImpact);
+    const { promise, cancel } = binarySearchTradeValues(currPrice, market, fee, ethPrice, targetDecimal, 'priceImpact');
     cancelPriceImpactSearch.current = cancel;
 
     promise
@@ -169,7 +189,7 @@ export const PriceImpact = () => {
         setTargetPriceImpactLoading(false);
       })
       .catch(e => {
-        if (e !== 'cancelled') throw e;
+        handleError(e)
       })
     return () => cancelPriceImpactSearch.current();
   };
@@ -177,7 +197,6 @@ export const PriceImpact = () => {
   const onTargetPrice = () => {
     cancelPriceSearch.current();
 
-    setTargetPriceValue(null);
     setTargetPriceLoading(true);
     const token = getToken();
     const market = {
@@ -199,10 +218,60 @@ export const PriceImpact = () => {
       })
       .catch(e => {
         setTargetPriceLoading(false);
-        if (e !== 'cancelled') throw e;
+        handleError(e)
       })
 
     return () => cancelPriceSearch.current();
+  };
+
+  const onTargetTWAP = () => {
+    cancelTWAPSearch.current();
+
+    setTargetTWAPLoading(true);
+    const token = getToken();
+    const market = {
+      symbol,
+      underlying: token.address,
+      decimals: token.decimals,
+    }
+
+    let currPriceDecimal = new Decimal(utils.formatEther(currPrice));
+    let target = new Decimal(targetETHTWAP);
+
+    target = target.pow(window).div(currPriceDecimal.pow(window - attackBlocks)).pow(1 / attackBlocks)
+    console.log('target TWAP: ', target.toString());
+
+    if (target.lt(1e-18)) {
+      setError('Target TWAP price is lower than 1e-18');
+      setErrorOpen(true);
+      setTargetTWAPLoading(false);
+      return;
+    }
+
+
+    const { promise, cancel } = binarySearchTradeValues(currPrice, market, fee, ethPrice, target, 'price');
+    cancelPriceSearch.current = cancel;
+
+    promise
+      .then(([pump, dump]) => {
+        setTargetTWAPValue({pump: pump && pump.best, dump: dump && dump.best});
+        const standardTrades = getStandardTrades().reduce((accu, t) => {
+          accu.pump.push(t.pump);
+          accu.dump.push(t.dump);
+          return accu
+        }, { pump: [], dump: []})
+        setTrades({
+          pump: sortBy(standardTrades.pump.concat(pump ? pump.trades : []), 'value'), 
+          dump: sortBy(standardTrades.dump.concat(dump ? dump.trades : []), 'value'), 
+        })
+        setTargetTWAPLoading(false);
+      })
+      .catch(e => {
+        setTargetTWAPLoading(false);
+        handleError(e);
+      })
+
+    return () => cancelTWAPSearch.current();
   };
 
   const resetMarket = () => {
@@ -238,6 +307,24 @@ export const PriceImpact = () => {
     }
   };
 
+  const handleTargetTWAP = (currency) => (event) => {
+    if (currency === 'eth') {
+      setTargetETHTWAP(event.target.value);
+      setTargetUSDTWAP(numberFormatText(event.target.value * ethPrice, true));
+    } else {
+      setTargetUSDTWAP(event.target.value);
+      setTargetETHTWAP(numberFormatText(event.target.value / ethPrice, true));
+    }
+  };
+
+  const handleWindow = (event) => {
+    setWindow(event.target.value);
+  };
+
+  const handleAttackBlocks = (event) => {
+    setAttackBlocks(event.target.value);
+  };
+
   const handleDownload = () => {
     csvLink.current.link.click();
   }
@@ -245,6 +332,21 @@ export const PriceImpact = () => {
   const handleTargetPriceImpact = (event) => {
     setTargetPriceImpact(event.target.value);
   }
+
+  const handleErrorClose = () => {
+    setErrorOpen(false)
+  }
+
+  const handleError = (e) => {
+    if (e.message !== 'cancelled') {
+      if (e.message === 'MAX') {
+        setError("Max trade value exceeded")
+      } else {
+        setError(e.message)
+      }
+      setErrorOpen(true)
+    };
+  } 
 
   const stringToFixed = (val, precision) => {
     const i = val.indexOf('.')
@@ -283,6 +385,7 @@ export const PriceImpact = () => {
   const filterOptions = (options, { inputValue }) => {
     return matchSorter(options, inputValue, { keys: ["name", "symbol", "address"] })
   }
+
 
   return (
     <Box display="flex" sx={{height: '100vh'}}>
@@ -362,7 +465,7 @@ export const PriceImpact = () => {
             <FormControl fullWidth>
             <TextField
               id="target-price-eth"
-              label="Target Price ETH"
+              label="Target Spot ETH"
               variant="outlined"
               value={targetETHPrice}
               onChange={handleTargetPrice('eth')}
@@ -385,8 +488,8 @@ export const PriceImpact = () => {
           <Box sx={{ minWidth: 120, width: 200, margin: 1, }}>
             <FormControl fullWidth>
             <TextField
-              id="target-price-usd"
-              label="Target Price USD"
+              id="target-twap-usd"
+              label="Target Spot USD"
               variant="outlined"
               value={targetUSDPrice}
               onChange={handleTargetPrice('usd')}
@@ -406,6 +509,78 @@ export const PriceImpact = () => {
             />
             </FormControl>
           </Box>
+          <Box sx={{ minWidth: 120, width: 200, margin: 1, }}>
+            <FormControl fullWidth>
+            <TextField
+              id="target-twap-window"
+              label="TWAP window"
+              variant="outlined"
+              value={window}
+              onChange={handleWindow}
+              InputLabelProps={{ shrink: true }}
+            />
+            </FormControl>
+          </Box>
+          <Box sx={{ minWidth: 120, width: 200, margin: 1, }}>
+            <FormControl fullWidth>
+            <TextField
+              id="target-twap-blocks"
+              label="Attack Blocks"
+              variant="outlined"
+              value={attackBlocks}
+              onChange={handleAttackBlocks}
+              InputLabelProps={{ shrink: true }}
+            />
+            </FormControl>
+          </Box>
+          <Box sx={{ minWidth: 120, width: 200, margin: 1, }}>
+            <FormControl fullWidth>
+            <TextField
+              id="target-twap-eth"
+              label="Target TWAP ETH"
+              variant="outlined"
+              value={targetETHTWAP}
+              onChange={handleTargetTWAP('eth')}
+              InputLabelProps={{ shrink: true }}
+              InputProps={{
+                endAdornment: (
+                  <IconButton
+                    disabled={!tokenList.length || !ethPrice ||  !currPrice || targetTWAPLoading}
+                    color="primary"
+                    onClick={onTargetTWAP}
+                    sx={{marginLeft: 1}}
+                  >
+                    <PlayArrowIcon />
+                  </IconButton>
+                )
+              }}
+            />
+            </FormControl>
+          </Box>
+          <Box sx={{ minWidth: 120, width: 200, margin: 1, }}>
+            <FormControl fullWidth>
+            <TextField
+              id="target-price-usd"
+              label="Target TWAP USD"
+              variant="outlined"
+              value={targetUSDTWAP}
+              onChange={handleTargetTWAP('usd')}
+              InputLabelProps={{ shrink: true }}
+              InputProps={{
+                endAdornment: (
+                  <IconButton
+                    disabled={!tokenList.length || !ethPrice ||  !currPrice || targetTWAPLoading}
+                    color="primary"
+                    onClick={onTargetTWAP}
+                    sx={{marginLeft: 1}}
+                  >
+                    <PlayArrowIcon />
+                  </IconButton>
+                )
+              }}
+            />
+            </FormControl>
+          </Box>
         <Button
           sx={{ minWidth: 120, width: 200, margin: 1, }}
           disabled={!trades}
@@ -415,10 +590,10 @@ export const PriceImpact = () => {
         >
           Download csv
         </Button>
-        {trades && (
+        {trades && trades.pump.length > 0 && (
           <CSVLink
             headers={['VALUE', 'PUMP PRICE IMPACT', 'PUMP PRICE', 'DUMP PRICE IMPACT', 'DUMP PRICE']}
-            data={getStandardTrades().map(({ pump, dump }) => [pump.value, pump.priceImpact, pump.price, dump.priceImpact, dump.price])}
+            data={getStandardTrades().map(({ pump, dump }) => pump && dump &&[pump.value, pump.priceImpact, pump.price, dump.priceImpact, dump.price])}
             target="_blank"
             filename={`${symbol}_${fee}.csv`}
             ref={csvLink}
@@ -447,7 +622,7 @@ export const PriceImpact = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {getStandardTrades().map((row) => (
+                      {getStandardTrades().map((row) => row.pump && (
                         <TableRow
                           key={row.pump.value}
                           sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
@@ -463,61 +638,70 @@ export const PriceImpact = () => {
                   </Table>
                 </TableContainer>
               </Box>
+              {trades && trades.pump.length ===0 && (
+                <Box display="flex" mt={1} mb={1} sx={{color: "red"}} flex>
+                  NO LIQUIDITY
+                </Box>
+              )}
             </Box>
-            <Box display="flex" flexDirection="column" ml={1} mt={1}>
-              <LineChart
-                width={900}
-                height={450}
-                data={pumpChartData}
-                margin={{
-                  top: 5,
-                  right: 30,
-                  left: 40,
-                  bottom: 5,
-                }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="value" domain={['dataMin', 'dataMax']} type="number" tickFormatter={(tick) => {
-                  return numberFormatText(tick)
-                }}/>
-                <YAxis type="number" />
-                <Tooltip 
-                  content={CustomTooltip} 
-                  labelFormatter={v => v.toLocaleString() + ' USD'} 
-                  formatter={(value, name) => [name === 'price impact' ? `${value}%` : value, name]}
-                />
-                <Legend />
-                {targetPriceImpactValue && <ReferenceLine x={targetPriceImpactValue.pump.value} stroke="red" label="Target Price Impact" />}
-                {targetPriceValue && targetPriceValue.pump && <ReferenceLine x={targetPriceValue.pump.value} stroke="violet" label="Target Price" />}
-                <Line name="price impact" type="monotone" dataKey="priceImpact" stroke="#8884d8" activeDot={{ r: 8 }} />
-              </LineChart>
-              <LineChart
-                width={900}
-                height={450}
-                data={dumpChartData}
-                margin={{
-                  top: 5,
-                  right: 30,
-                  left: 40,
-                  bottom: 5,
-                }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="value" domain={['dataMin', 'dataMax']} type="number" tickFormatter={(tick) => {
-                  return numberFormatText(tick)
-                }}/>
-                <YAxis type="number" />
-                <Tooltip
-                  content={CustomTooltip}
-                  labelFormatter={v => v.toLocaleString() + ' USD'}
-                  formatter={(value, name) => [name === 'price impact' ? `${value}%` : value, name]}
-                />
-                <Legend />
-                {targetPriceImpactValue && <ReferenceLine x={targetPriceImpactValue.dump.value} stroke="red" label="Target Price Impact" />}
-                {targetPriceValue && targetPriceValue.dump && <ReferenceLine x={targetPriceValue.dump.value} stroke="violet" label="Target Price" />}
-                <Line name="price impact" type="monotone" dataKey="priceImpact" stroke="#82ca9d" activeDot={{ r: 8 }} />
-              </LineChart>
-            </Box>
+            {trades && trades.pump.length > 0 && (
+              <Box display="flex" flexDirection="column" ml={1} mt={1}>
+                <LineChart
+                  width={900}
+                  height={450}
+                  data={pumpChartData}
+                  margin={{
+                    top: 5,
+                    right: 30,
+                    left: 40,
+                    bottom: 5,
+                  }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="value" domain={['dataMin', 'dataMax']} type="number" tickFormatter={(tick) => {
+                    return numberFormatText(tick)
+                  }}/>
+                  <YAxis type="number" />
+                  <Tooltip 
+                    content={CustomTooltip} 
+                    labelFormatter={v => v.toLocaleString() + ' USD'} 
+                    formatter={(value, name) => [name === 'price impact' ? `${value}%` : value, name]}
+                  />
+                  <Legend />
+                  {targetPriceImpactValue && <ReferenceLine x={targetPriceImpactValue.pump.value} stroke="red" label="Target Price Impact" />}
+                  {targetPriceValue && targetPriceValue.pump && <ReferenceLine x={targetPriceValue.pump.value} stroke="violet" label="Target Price" />}
+                  {targetTWAPValue && targetTWAPValue.pump && <ReferenceLine x={targetTWAPValue.pump.value} stroke="green" label="Target TWAP" />}
+                  <Line name="price impact" type="monotone" dataKey="priceImpact" stroke="#8884d8" activeDot={{ r: 8 }} />
+                </LineChart>
+                <LineChart
+                  width={900}
+                  height={450}
+                  data={dumpChartData}
+                  margin={{
+                    top: 5,
+                    right: 30,
+                    left: 40,
+                    bottom: 5,
+                  }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="value" domain={['dataMin', 'dataMax']} type="number" tickFormatter={(tick) => {
+                    return numberFormatText(tick)
+                  }}/>
+                  <YAxis type="number" />
+                  <Tooltip
+                    content={CustomTooltip}
+                    labelFormatter={v => v.toLocaleString() + ' USD'}
+                    formatter={(value, name) => [name === 'price impact' ? `${value}%` : value, name]}
+                  />
+                  <Legend />
+                  {targetPriceImpactValue && <ReferenceLine x={targetPriceImpactValue.dump.value} stroke="red" label="Target Price Impact" />}
+                  {targetPriceValue && targetPriceValue.dump && <ReferenceLine x={targetPriceValue.dump.value} stroke="violet" label="Target Price" />}
+                  {targetTWAPValue && targetTWAPValue.dump && <ReferenceLine x={targetTWAPValue.dump.value} stroke="green" label="Target TWAP" />}
+                  <Line name="price impact" type="monotone" dataKey="priceImpact" stroke="#82ca9d" activeDot={{ r: 8 }} />
+                </LineChart>
+              </Box>
+            )}
           </>
           
         )
@@ -526,6 +710,24 @@ export const PriceImpact = () => {
             <CircularProgress />
           </Box>
         )}
+      <Dialog
+        open={errorOpen}
+        onClose={handleErrorClose}
+        aria-labelledby="alert-dialog-title"
+        aria-describedby="alert-dialog-description"
+      >
+        <DialogTitle id="alert-dialog-title">
+          ERROR
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="alert-dialog-description">
+            {error}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleErrorClose}>OK</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

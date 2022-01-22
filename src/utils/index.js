@@ -2,6 +2,7 @@
 
 import { Contract, providers, BigNumber, utils, constants } from "ethers";
 import { sortBy } from "lodash";
+import { Decimal } from "decimal.js";
 
 const c1e18 = BigNumber.from(10).pow(18);
 const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
@@ -93,6 +94,7 @@ export const getDump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
       value: tradeValueInUSD,
       priceImpact: utils.formatUnits(priceImpact.mul(100), market.decimals),
       price: formatPrice(after, market),
+      after,
     }
   } catch (e) {
     console.log('e: ', market.symbol, e);
@@ -126,6 +128,7 @@ export const getPump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
       value: tradeValueInUSD,
       priceImpact: utils.formatUnits(priceImpact.mul(100), market.decimals),
       price: formatPrice(after, market),
+      after,
     }
   } catch (e) {
     console.log('e: ', market.symbol, e);
@@ -145,7 +148,7 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
   let currPriceFormatted = formatPrice(currPrice, market);
   if (
     targetType === 'price' &&
-    (direction === 'pump' && target <= currPriceFormatted || direction === 'dump' && target >= currPriceFormatted)
+    (direction === 'pump' && target.lte(currPriceFormatted) || direction === 'dump' && target.gte(currPriceFormatted))
   ) return [];
 
   let isCancelled = false
@@ -157,35 +160,25 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
     let high = 1_000_000_000;
     let low = 0;
 
-    let tolerance = 0.01;
+    let tolerance = 0.0001;
     let ranges = 20;
     let allTrades = []
     
     let best;
    
     const getTrade = direction === 'pump' ? getPump : getDump;
-    
-    // while (best < target) {
-    //     if (isCancelled) throw 'cancelled';
-    //     high = high * factor;
-    //     best = Math.abs(await getTrade(currPrice, market, fee, ethPrice, high));
-    //     factor += 1;
-    //   }
-      
-    // low = high === 100000 * 2 ? 0 : high / (factor - 1);
-    // Math.abs(best[targetType] - target) > tolerance
-      
+
     high = 1_000_000_000;
     low = 0;
-    let tradeValue = -1;
-    while (high - low > high * tolerance) {
 
-      console.log('searching...');
-      
+    let i = 0;
+    while (high - low > high * tolerance) {
       if (isCancelled) throw new Error('cancelled');
 
+      console.log(direction, 'searching...');
+
       let ticks = Array(ranges - 1).fill(null).map((_, i) => low + (high - low) / ranges * (i + 1));
-      if (direction === 'dump') console.log(direction, 'ticks: ', ticks);
+      console.log(direction, 'ticks: ', ticks);
 
       const samples = await Promise.all(ticks.map(async (tick, index) => {
         const trade = await getTrade(currPrice, market, fee, ethPrice, tick);
@@ -199,36 +192,50 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
       }));
 
       best = samples.reduce((accu, s, i) => {
-        if (Math.abs(s[targetType] - target) < Math.abs(accu[targetType] - target)) {
-          if (direction === 'dump') console.log(direction, 'found:', s)
+        const sampleVal = new Decimal(s[targetType]);
+        const accuVal = new Decimal(accu[targetType])
+
+        if (sampleVal.log(10).sub(target.log(10)).abs().lessThan(accuVal.log(10).sub(target.log(10)).abs())) {
+          console.log(direction, 'found:', s)
           return s;
         }
         return accu;
       });
-      if (direction === 'dump') console.log(direction, 'best: ', best);
-      
-      // no improvement after the first sample - go down the left
-      if (best.index === 0) { 
+      console.log(direction, 'best: ', best);
+
+      // best result is to the right, increase range
+      if (i === 0 && best.index === ranges - 2) {
+        high *= 1_000_000; // 1000 trillions
+        low = ticks[ranges - 3];
+      } else if (i === 1 && best.index === ranges - 2 && high > 1_000_000_000) { 
+        // range was increased already, it's ridiculous to continue
+        throw new Error('MAX');
+      } else if (best.index === 0) { 
+        // no improvement after the first sample - go down the left
         high = ticks[1];
-        if (direction === 'dump') console.log(direction, 'low high: ', low, high);
-        continue;
-      }
-      
-      // otherwise make sure to have the cliff in range
-      for (let j = 0; j < best.index; j++) {
-        if (samples[j].priceImpact < best.priceImpact) {
-          low = ticks[j];
+      } else {
+        // otherwise make sure to have the cliff in range
+        for (let j = 0; j < best.index; j++) {
+          if (samples[j].priceImpact < best.priceImpact) {
+            low = ticks[j];
+          }
         }
+        high = ticks[best.index + 1] || high;
       }
-      high = ticks[best.index + 1] || high;
-      if (direction === 'dump') console.log(direction, 'low high: ', low, high);
+      console.log(direction, 'low high: ', low, high);
+      i++;
     }
 
     allTrades = sortBy(allTrades, 'value');
    
     // take the best trade above target
-    best = allTrades.find(t => Math.abs(t[targetType]) > target);
-    if (direction === 'dump') console.log('RESULT', best);
+    best = allTrades.find(
+      t => targetType === 'priceImpact' || direction === 'pump'
+        ? target.lte(Decimal.abs(t[targetType]))
+        : target.gte(Decimal.abs(t[targetType]))
+    );
+
+    console.log(direction, 'RESULT', best);
     return {
       best,
       // include trades below and a few over
