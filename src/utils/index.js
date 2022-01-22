@@ -160,7 +160,7 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
     let high = 1_000_000_000;
     let low = 0;
 
-    let tolerance = 0.0001;
+    let tolerance = 0.01;
     let ranges = 20;
     let allTrades = []
     
