@@ -40,7 +40,7 @@ export const sqrtPriceX96ToPrice = (a, invert) => {
   return a;
 }
 
-export const MAX_PRICE = sqrtPriceX96ToPrice(MAX_SQRT_RATIO, false).toString();
+export const MAX_TICK_PRICE = sqrtPriceX96ToPrice(MAX_SQRT_RATIO, false).toString();
 
 
 export const getCurrPrice = async (market, fee) => {

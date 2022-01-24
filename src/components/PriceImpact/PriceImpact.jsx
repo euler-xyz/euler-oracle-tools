@@ -41,7 +41,7 @@ import {
   binarySearchTradeValues,
   formatPrice,
   getPoolFees,
-  MAX_PRICE,
+  MAX_TICK_PRICE,
   WETH_ADDRESS,
   computeUniV3PoolAddress,
 } from "../../utils";
@@ -240,7 +240,7 @@ export const PriceImpact = () => {
   const onTargetTWAP = () => {
     cancelTWAPSearch.current();
 
-    // setTargetTWAPLoading(true);
+    setTargetTWAPLoading(true);
     const token = getToken();
     const market = {
       symbol,
@@ -262,7 +262,7 @@ export const PriceImpact = () => {
       return;
     }
 
-    if (target.gt(formatPrice(MAX_PRICE, market))) {
+    if (target.gt(formatPrice(MAX_TICK_PRICE, market))) {
       setError('Target spot price is higher than max supported price');
       setErrorOpen(true);
       setTargetTWAPLoading(false);
