@@ -240,7 +240,7 @@ export const PriceImpact = () => {
   const onTargetTWAP = () => {
     cancelTWAPSearch.current();
 
-    setTargetTWAPLoading(true);
+    // setTargetTWAPLoading(true);
     const token = getToken();
     const market = {
       symbol,
@@ -253,7 +253,7 @@ export const PriceImpact = () => {
 
     target = target.pow(window).div(currPriceDecimal.pow(window - attackBlocks)).pow(1 / attackBlocks)
     
-    console.log('target TWAP spot: ', target.toString());
+    console.log('target TWAP spot: ', target.toFixed(10));
 
     if (target.lt(1e-18)) {
       setError('Target spot price is lower than min supported price');
@@ -262,7 +262,7 @@ export const PriceImpact = () => {
       return;
     }
 
-    if (target.gt(MAX_PRICE)) {
+    if (target.gt(formatPrice(MAX_PRICE, market))) {
       setError('Target spot price is higher than max supported price');
       setErrorOpen(true);
       setTargetTWAPLoading(false);

@@ -42,6 +42,7 @@ export const sqrtPriceX96ToPrice = (a, invert) => {
 
 export const MAX_PRICE = sqrtPriceX96ToPrice(MAX_SQRT_RATIO, false).toString();
 
+
 export const getCurrPrice = async (market, fee) => {
   if (market.underlying.toLowerCase() === WETH_ADDRESS) return BigNumber.from(1);
   try {
@@ -227,12 +228,12 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
 
     allTrades = sortBy(allTrades, 'value');
    
-    // take the best trade above target
+    // take the best trade above target if available
     best = allTrades.find(
       t => targetType === 'priceImpact' || direction === 'pump'
         ? target.lte(Decimal.abs(t[targetType]))
         : target.gte(Decimal.abs(t[targetType]))
-    );
+    ) || best;
 
     console.log(direction, 'RESULT', best);
     return {
