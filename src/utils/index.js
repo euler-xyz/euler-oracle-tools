@@ -5,11 +5,10 @@ import { sortBy } from "lodash";
 import { Decimal } from "decimal.js";
 
 const c1e18 = BigNumber.from(10).pow(18);
-const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
 const UNISWAP_QUOTERV2_ADDRESS = '0x0209c4Dc18B2A1439fD2427E34E7cF3c6B91cFB9';
-const UNISWAP_FACTORY_ADDRESS = '0x1F98431c8aD98523631AE4a59f267346ea31F984'
-const POOL_INIT_CODE_HASH = '0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54'
-
+const UNISWAP_FACTORY_ADDRESS = '0x1F98431c8aD98523631AE4a59f267346ea31F984';
+const POOL_INIT_CODE_HASH = '0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54';
+const MAX_SQRT_RATIO = '1461446703485210103287273052203988822378723970342'; // from TickMath.sol
 const provider = new providers.JsonRpcProvider(process.env.REACT_APP_ETHEREUM_HTTP);
 const quoterAbi = [
   'function quoteExactInputSingle(tuple(address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) public returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
@@ -24,12 +23,14 @@ const quoterContract = new Contract(
   UNISWAP_QUOTERV2_ADDRESS,
   quoterAbi,
   provider,
-);
-const factoryContract = new Contract(
-  UNISWAP_FACTORY_ADDRESS,
-  factoryAbi,
-  provider,
-);
+  );
+  const factoryContract = new Contract(
+    UNISWAP_FACTORY_ADDRESS,
+    factoryAbi,
+    provider,
+    );
+    
+export const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
 
 export const sqrtPriceX96ToPrice = (a, invert) => {
   const scale = BigNumber.from(2).pow(96*2).div(c1e18);
@@ -38,6 +39,8 @@ export const sqrtPriceX96ToPrice = (a, invert) => {
   if (invert) a = c1e18.mul(c1e18).div(a);
   return a;
 }
+
+export const MAX_PRICE = sqrtPriceX96ToPrice(MAX_SQRT_RATIO, false).toString();
 
 export const getCurrPrice = async (market, fee) => {
   if (market.underlying.toLowerCase() === WETH_ADDRESS) return BigNumber.from(1);
@@ -159,17 +162,13 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
   const exec = async () => {
     let high = 1_000_000_000;
     let low = 0;
-
     let tolerance = 0.01;
     let ranges = 20;
-    let allTrades = []
-    
+
+    let allTrades = [] 
     let best;
    
     const getTrade = direction === 'pump' ? getPump : getDump;
-
-    high = 1_000_000_000;
-    low = 0;
 
     let i = 0;
     while (high - low > high * tolerance) {
@@ -209,14 +208,14 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
         low = ticks[ranges - 3];
       } else if (i === 1 && best.index === ranges - 2 && high > 1_000_000_000) { 
         // range was increased already, it's ridiculous to continue
-        throw new Error('MAX');
+        throw new Error('Max trade value exceeded (1000T USD)');
       } else if (best.index === 0) { 
         // no improvement after the first sample - go down the left
         high = ticks[1];
       } else {
-        // otherwise make sure to have the cliff in range
+        // otherwise make sure the range is not flat
         for (let j = 0; j < best.index; j++) {
-          if (samples[j].priceImpact < best.priceImpact) {
+          if (samples[j][targetType] !== best[targetType]) {
             low = ticks[j];
           }
         }
@@ -288,7 +287,7 @@ export const numberFormatText = (num, noAbbrev = false) => {
 }
 
 export const formatPrice = (price, token) =>
- utils.formatEther(price.div(BigNumber.from(10).pow(18 - token.decimals)));
+ utils.formatEther(BigNumber.from(price).div(BigNumber.from(10).pow(18 - token.decimals)));
 
  export function computeUniV3PoolAddress(tokenA, tokenB, fee) {
   const [token0, token1] = BigNumber.from(tokenA).lt(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA]
