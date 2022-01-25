@@ -23,12 +23,12 @@ const quoterContract = new Contract(
   UNISWAP_QUOTERV2_ADDRESS,
   quoterAbi,
   provider,
-  );
-  const factoryContract = new Contract(
-    UNISWAP_FACTORY_ADDRESS,
-    factoryAbi,
-    provider,
-    );
+);
+const factoryContract = new Contract(
+  UNISWAP_FACTORY_ADDRESS,
+  factoryAbi,
+  provider,
+);
     
 export const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
 
@@ -99,7 +99,10 @@ export const getDump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
       priceImpact: utils.formatUnits(priceImpact.mul(100), market.decimals),
       price: formatPrice(after, market),
       after,
-    }
+      amountOut: quote.amountOut,
+      tokenOut: WETH_ADDRESS,
+      gasEstimate: quote.gasEstimate,
+    };
   } catch (e) {
     console.log('e: ', market.symbol, e);
     throw e;
@@ -122,7 +125,7 @@ export const getPump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
       tokenOut: market.underlying,
       fee,
       amountIn,
-      sqrtPriceLimitX96: 0
+      sqrtPriceLimitX96: 0,
     });
 
     let after = sqrtPriceX96ToPrice(quote.sqrtPriceX96After, inverted);
@@ -133,7 +136,10 @@ export const getPump = async (currPrice, market, fee, ethPrice, tradeValueInUSD)
       priceImpact: utils.formatUnits(priceImpact.mul(100), market.decimals),
       price: formatPrice(after, market),
       after,
-    }
+      amountOut: quote.amountOut,
+      tokenOut: market.underlying,
+      gasEstimate: quote.gasEstimate,
+    };
   } catch (e) {
     console.log('e: ', market.symbol, e);
     throw e;
@@ -203,7 +209,7 @@ export const searchTrade = (currPrice, market, fee, ethPrice, target, targetType
       });
       console.log(direction, 'best: ', best);
 
-      // best result is to the right, increase range
+      // best result is to the far right, increase range
       if (i === 0 && best.index === ranges - 2) {
         high *= 1_000_000; // 1000 trillions
         low = ticks[ranges - 3];
@@ -253,9 +259,7 @@ export const binarySearchTradeValues = (currPrice, market, fee, ethPrice, target
     if (cancelDump) cancelDump();
   };
 
-  const exec = () => Promise.all([execPump, execDump]);
-
-  return { promise: exec(), cancel };
+  return { promise: Promise.all([execPump, execDump]), cancel };
 }
 
 export const numberFormatText = (num, noAbbrev = false) => {
