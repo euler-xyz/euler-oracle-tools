@@ -153,9 +153,10 @@ export const PriceImpact = () => {
   }
   
   const getCostOfAttack = trade => {
+    console.log('formatPrice(currPrice, token): ', formatPrice(currPrice, token));
     return trade.tokenOut === WETH_ADDRESS
       ? trade.value - utils.formatEther(trade.amountOut) * ethPrice
-      : trade.value - utils.formatUnits(trade.amountOut, token.decimals) * formatPrice(currPrice, token);
+      : trade.value - utils.formatUnits(trade.amountOut, token.decimals) * formatPrice(currPrice, token) * ethPrice;
   };
 
   useEffect(() => {
