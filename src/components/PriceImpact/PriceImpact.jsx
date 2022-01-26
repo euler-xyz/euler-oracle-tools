@@ -46,8 +46,11 @@ import {
   formatPrice,
   getPoolFees,
   MAX_TICK_PRICE,
+  MIN_TICK_PRICE,
   WETH_ADDRESS,
   computeUniV3PoolAddress,
+  priceToSqrtX96Price,
+  sqrtPriceX96ToPrice,
 } from "../../utils";
 
 
@@ -55,39 +58,40 @@ import {
 export const PriceImpact = () => {
   const [tokenList, setTokenList] = useState([]);
   const [symbol, setSymbol] = useState('USDC');
+
   const [fee, setFee] = useState(3000);
   const [ethPrice, setEthPrice] = useState(0);
   const [trades, setTrades] = useState();
   const [currPrice, setCurrPrice] = useState();
-  const [marketPriceUSD, setMarketPriceUSD] = useState();
+  const [currSqrtPriceX96, setCurrSqrtPriceX96] = useState();
   const [poolFees, setPoolFees] = useState([]);
 
   const [targetPriceImpact, setTargetPriceImpact] = useState(90);
   const [targetPriceImpactLoading, setTargetPriceImpactLoading] = useState(false);
   const [targetPriceImpactValue, setTargetPriceImpactValue] = useState();
   
-  const [targetETHPrice, setTargetETHPrice] = useState('');
-  const [targetUSDPrice, setTargetUSDPrice] = useState('');
+  const [targetEthPrice, setTargetEthPrice] = useState('');
+  const [targetUsdPrice, setTargetUsdPrice] = useState('');
   const [targetPriceLoading, setTargetPriceLoading] = useState(false);
   const [targetPriceValue, setTargetPriceValue] = useState();
   
   const [window, setWindow] = useState(144);
   const [attackBlocks, setAttackBlocks] = useState(1);
-  const [targetETHTWAP, setTargetETHTWAP] = useState('');
-  const [targetUSDTWAP, setTargetUSDTWAP] = useState('');
-  const [targetTWAPLoading, setTargetTWAPLoading] = useState(false);
-  const [targetTWAPValue, setTargetTWAPValue] = useState();
-  const [targetTWAPSpot, setTargetTWAPSpot] = useState('');
-  const [minTargetTWAPSpot, setMinTargetTWAPSpot] = useState('');
-  const [maxTargetTWAPSpot, setMaxTargetTWAPSpot] = useState('');
+  const [targetEthTwap, setTargetEthTwap] = useState('');
+  const [targetUsdTwap, setTargetUsdTwap] = useState('');
+  const [targetTwapLoading, setTargetTwapLoading] = useState(false);
+  const [targetTwapValue, setTargetTwapValue] = useState();
+  const [targetTwapSpot, setTargetTwapSpot] = useState('');
 
   const [error, setError] = useState();
   const [errorOpen, setErrorOpen] = useState(false);
-
+// todo here
   const cancelPriceImpactSearch = useRef(() => {});
   const cancelPriceSearch = useRef(() => {});
-  const cancelTWAPSearch = useRef(() => {});
+  const cancelTwapSearch = useRef(() => {});
   const csvLink = useRef();
+
+  const token = tokenList.length > 0 && tokenList.find(t => t.symbol === symbol)
 
   const amountsUSD = [
     100_000,
@@ -110,45 +114,54 @@ export const PriceImpact = () => {
     9_000_000,
     10_000_000,
   ];
-  
-  const getToken = () => tokenList.find(t => t.symbol === symbol);
 
-  const getStandardTrades = () => {
+  let minTargetTwapSpotPercentage = '-';
+  let maxTargetTwapSpotPercentage = '-';
+  let maxTargetTwapSpot
+  let minTargetTwapSpot
+  let twapTargetExceedsMax = false;
+
+  if (currPrice && ethPrice) {
+    const p = formatPrice(currPrice, token);
+
+    maxTargetTwapSpot = MAX_TICK_PRICE.pow(attackBlocks).mul(Decimal.pow(p, window - attackBlocks)).pow(Decimal.div(1, window));
+    minTargetTwapSpot = MIN_TICK_PRICE.pow(attackBlocks).mul(Decimal.pow(p, window - attackBlocks)).pow(Decimal.div(1, window));
+
+    minTargetTwapSpotPercentage = Decimal.sub(minTargetTwapSpot, p).div(p).mul(100).round().toString();
+    maxTargetTwapSpotPercentage = Decimal.sub(maxTargetTwapSpot, p).div(p).mul(100).round().toString();
+
+    if (targetEthTwap) {
+      const t = new Decimal(targetEthTwap);
+      twapTargetExceedsMax = t.lt(minTargetTwapSpot) || t.gt(maxTargetTwapSpot);
+    }
+  }
+  
+  const getStandardTradesTable = () => {
     return amountsUSD.map(a => {
       const pump = trades.pump.find(t => t.value === a);
       const dump = trades.dump.find(t => t.value === a);
       return { pump, dump };
     })
   };
+
+  const getStandardTrades = () => {
+    return getStandardTradesTable().reduce((accu, t) => {
+      accu.pump.push(t.pump);
+      accu.dump.push(t.dump);
+      return accu
+    }, { pump: [], dump: []})
+  }
   
   const getCostOfAttack = trade => {
     return trade.tokenOut === WETH_ADDRESS
       ? trade.value - utils.formatEther(trade.amountOut) * ethPrice
-      : trade.value - utils.formatUnits(trade.amountOut, getToken().decimals) * marketPriceUSD
+      : trade.value - utils.formatUnits(trade.amountOut, token.decimals) * formatPrice(currPrice, token);
   };
-
-  const getMarketPriceUSD = tokenSymbol => axios.get(`https://min-api.cryptocompare.com/data/price?fsym=${tokenSymbol}&tsyms=USD`);
-
-  const setMinMaxTargetTWAPSpot = () => {
-    const market = getToken();
-    const currPriceDecimal = new Decimal(formatPrice(currPrice, market));
-    const maxPrice = new Decimal(formatPrice(MAX_TICK_PRICE, market));
-    const minPrice = Decimal.pow(10, -18);
-
-    let maxTarget = maxPrice.pow(attackBlocks).mul(currPriceDecimal.pow(window - attackBlocks)).pow(Decimal.div(1, window));
-    let minTarget = minPrice.pow(attackBlocks).mul(currPriceDecimal.pow(window - attackBlocks)).pow(Decimal.div(1, window));
-
-    // some precision is lost, adjusting
-    const precision = Decimal.pow(10, 8);
-    maxTarget = maxTarget.mul(precision).floor().div(precision);
-    setMaxTargetTWAPSpot(maxTarget.toFixed(18));
-    setMinTargetTWAPSpot(minTarget.toFixed(18));
-  }
 
   useEffect(() => {
     Promise.all([
       axios.get('https://raw.githubusercontent.com/euler-xyz/euler-tokenlist/master/euler-tokenlist.json'),
-      getMarketPriceUSD('ETH'),
+      axios.get(`https://min-api.cryptocompare.com/data/price?fsym=ETH&tsyms=USD`),
     ])
     .then(([result1, result2]) => {
       setTokenList(sortBy(result1.data.tokens, 'symbol'));
@@ -159,7 +172,6 @@ export const PriceImpact = () => {
 
   useEffect(() => {
     if (!tokenList.length || !ethPrice) return;
-    const token = getToken();
 
     getPoolFees(token.address).then(fees => {
       setPoolFees(fees);
@@ -169,75 +181,48 @@ export const PriceImpact = () => {
 
   useEffect(() => {
     if (!tokenList.length || !ethPrice || !poolFees.includes(fee)) return;
-    const token = getToken();
-    const market = {
-      symbol,
-      underlying: token.address,
-      decimals: token.decimals,
-    }
 
-    Promise.all([
-      getCurrPrice(market, fee),
-      getMarketPriceUSD(symbol),
-    ]).then(([price, marketPrice]) => {
+    getCurrPrice(token, fee).then(({ price, sqrtPriceX96 }) => {
       setCurrPrice(price);
-      setTargetETHPrice(formatPrice(price, getToken()));
-      setTargetUSDPrice(formatPrice(price, getToken()) * ethPrice);
-      setTargetETHTWAP(formatPrice(price, getToken()));
-      setTargetUSDTWAP(formatPrice(price, getToken()) * ethPrice);
-
-      setMarketPriceUSD(marketPrice.data.USD)
+      setCurrSqrtPriceX96(sqrtPriceX96.toString());
+      setTargetEthPrice(formatPrice(price, token));
+      setTargetUsdPrice(formatPrice(price, token) * ethPrice);
+      setTargetEthTwap(formatPrice(price, token));
+      setTargetUsdTwap(formatPrice(price, token) * ethPrice);
     });
   }, [symbol, fee, poolFees, tokenList, ethPrice]);
 
   useEffect(() => {
     if (!tokenList.length || !ethPrice || !currPrice || !poolFees.includes(fee)) return;
-    const exec = async () => {
-      setTrades();
-      const token = getToken();
-      const market = {
-        symbol,
-        underlying: token.address,
-        decimals: token.decimals,
-      }
-      let res = await Promise.allSettled(amountsUSD.map(a => getPumpAndDump(currPrice, market, fee, ethPrice, a)));
-      res = res.filter(r => r.status === 'fulfilled').map(r => r.value);
 
+    setTrades(null);
+    Promise.all(amountsUSD.map(a => getPumpAndDump(currPrice, token, fee, ethPrice, a))).then(res => {
       setTrades({
         pump: res.map(r => r.pump),
         dump: res.map(r => r.dump),
       });
-    };
-    exec();
-  }, [symbol, fee, poolFees, tokenList, ethPrice, currPrice && currPrice.toString()]);
+    });
 
-  useEffect(() => {
-    if (!tokenList.length || !ethPrice || !currPrice || !poolFees.includes(fee) || !window || !attackBlocks) return;
-    setMinMaxTargetTWAPSpot();
-  }, [symbol, fee, poolFees, tokenList, ethPrice, currPrice && currPrice.toString(), window, attackBlocks]);
+  }, [symbol, fee, poolFees, tokenList, ethPrice, currPrice && currPrice.toString()]);
 
   const onTargetPriceImpact = () => {
     cancelPriceImpactSearch.current();
 
-    // setTargetPriceImpactValue(null);
     setTargetPriceImpactLoading(true);
-    const token = getToken();
-    const market = {
-      symbol,
-      underlying: token.address,
-      decimals: token.decimals,
-    }
 
     const targetDecimal = new Decimal(targetPriceImpact);
-    const { promise, cancel } = binarySearchTradeValues(currPrice, market, fee, ethPrice, targetDecimal, 'priceImpact');
+    const { promise, cancel } = binarySearchTradeValues(currPrice, currSqrtPriceX96, token, fee, ethPrice, targetDecimal, 'priceImpact');
     cancelPriceImpactSearch.current = cancel;
 
     promise
       .then(([pump, dump]) => {
+        resetResults();
         setTargetPriceImpactValue({pump: pump.best, dump: dump.best});
+
+        const standardTrades = getStandardTrades();
         setTrades({
-          pump: sortBy(trades.pump.concat(pump.trades), 'value'), 
-          dump: sortBy(trades.dump.concat(dump.trades), 'value'), 
+          pump: sortBy(standardTrades.pump.concat(pump.trades), 'value'), 
+          dump: sortBy(standardTrades.dump.concat(dump.trades), 'value'), 
         })
         setTargetPriceImpactLoading(false);
       })
@@ -251,22 +236,19 @@ export const PriceImpact = () => {
     cancelPriceSearch.current();
 
     setTargetPriceLoading(true);
-    const token = getToken();
-    const market = {
-      symbol,
-      underlying: token.address,
-      decimals: token.decimals,
-    }
-    const targetDecimal = new Decimal(targetETHPrice);
-    const { promise, cancel } = binarySearchTradeValues(currPrice, market, fee, ethPrice, targetDecimal, 'price');
+    const targetDecimal = new Decimal(targetEthPrice);
+    const { promise, cancel } = binarySearchTradeValues(currPrice, currSqrtPriceX96, token, fee, ethPrice, targetDecimal, 'price');
     cancelPriceSearch.current = cancel;
 
     promise
       .then(([pump, dump]) => {
+        resetResults();
         setTargetPriceValue({pump: pump && pump.best, dump: dump && dump.best});
+
+        const standardTrades = getStandardTrades();
         setTrades({
-          pump: sortBy(trades.pump.concat(pump ? pump.trades : []), 'value'), 
-          dump: sortBy(trades.dump.concat(dump ? dump.trades : []), 'value'), 
+          pump: sortBy(standardTrades.pump.concat(pump ? pump.trades : []), 'value'), 
+          dump: sortBy(standardTrades.dump.concat(dump ? dump.trades : []), 'value'), 
         })
         setTargetPriceLoading(false);
       })
@@ -278,67 +260,72 @@ export const PriceImpact = () => {
     return () => cancelPriceSearch.current();
   };
 
-  const onTargetTWAP = () => {
-    cancelTWAPSearch.current();
+  const onTargetTwap = () => {
 
-    const token = getToken();
-    const market = {
-      symbol,
-      underlying: token.address,
-      decimals: token.decimals,
-    }
+    cancelTwapSearch.current();
 
-    let currPriceDecimal = new Decimal(formatPrice(currPrice, market));
-    let target = new Decimal(targetETHTWAP);
+    let currPriceDecimal = new Decimal(utils.formatEther(currPrice.toString()));
+
+    let target = Decimal.mul(targetEthTwap, Decimal.pow(10, 18 - token.decimals));
 
     target = target.pow(window).div(currPriceDecimal.pow(window - attackBlocks)).pow(Decimal.div(1, attackBlocks));
 
-    target = target.mul(Decimal.pow(10, 18)).round().div(Decimal.pow(10, 18));
+    target = priceToSqrtX96Price(target);
+    setTargetTwapSpot(formatPrice(sqrtPriceX96ToPrice(target.toFixed()), token));
+    console.log('target price ETH:', formatPrice(sqrtPriceX96ToPrice(target.toFixed()), token));
+    console.log('target price USD:', formatPrice(sqrtPriceX96ToPrice(target.toFixed()), token) * ethPrice);
 
-    if (target.lt(Decimal.pow(10, -18))) {
-      handleError('Target spot price is lower than min supported price')
-      return;
-    }
-
-    if (target.gt(formatPrice(MAX_TICK_PRICE, market))) {
-      handleError('Target spot price is higher than max supported price');
-      return;
-    }
-
-    setTargetTWAPSpot(target.toString());
-    const { promise, cancel } = binarySearchTradeValues(currPrice, market, fee, ethPrice, target, 'price');
+    const { promise, cancel } = binarySearchTradeValues(currPrice, currSqrtPriceX96, token, fee, ethPrice, target, 'sqrtPriceX96After');
     cancelPriceSearch.current = cancel;
-    setTargetTWAPLoading(true);
+    setTargetTwapLoading(true);
     promise
       .then(([pump, dump]) => {
-        setTargetTWAPValue({pump: pump && pump.best, dump: dump && dump.best});
-        const standardTrades = getStandardTrades().reduce((accu, t) => {
-          accu.pump.push(t.pump);
-          accu.dump.push(t.dump);
-          return accu
-        }, { pump: [], dump: []})
+        resetResults();
+        setTargetTwapValue({pump: pump && pump.best, dump: dump && dump.best});
+
+        const standardTrades = getStandardTrades();
         setTrades({
           pump: sortBy(standardTrades.pump.concat(pump ? pump.trades : []), 'value'), 
           dump: sortBy(standardTrades.dump.concat(dump ? dump.trades : []), 'value'), 
         })
-        setTargetTWAPLoading(false);
       })
       .catch(e => {
-        setTargetTWAPLoading(false);
+        console.log('e: ', e);
         handleError(e);
       })
+      .finally(() => {
+        setTargetTwapLoading(false);
+      })
 
-    return () => cancelTWAPSearch.current();
+    return () => cancelTwapSearch.current();
+  };
+
+  const onMaxTwapTarget = (direction) => () => {
+    if (direction === 'pump') {
+      setTargetEthTwap(maxTargetTwapSpot);
+      setTargetUsdTwap(maxTargetTwapSpot * ethPrice);
+    } else {
+      setTargetEthTwap(minTargetTwapSpot);
+      setTargetUsdTwap(minTargetTwapSpot * ethPrice);
+    }
+  }
+
+  const resetResults = () => {
+    setTargetPriceImpactValue(null);
+    setTargetPriceValue(null);
+    setTargetTwapValue(null);
   };
 
   const resetMarket = () => {
     setCurrPrice(null);
-    setTrades();
+    setTrades(null);
     setTargetPriceImpactValue(null);
     setTargetPriceValue(null);
+    setTargetTwapValue(null);
     setFee(3000);
     setPoolFees([]);
-  }
+  };
+
   const handleToken = (option) => {
     if (!option) return;
     resetMarket();
@@ -356,21 +343,21 @@ export const PriceImpact = () => {
 
   const handleTargetPrice = (currency) => (event) => {
     if (currency === 'eth') {
-      setTargetETHPrice(event.target.value);
-      setTargetUSDPrice(numberFormatText(event.target.value * ethPrice, true));
+      setTargetEthPrice(event.target.value);
+      setTargetUsdPrice(event.target.value * ethPrice);
     } else {
-      setTargetUSDPrice(event.target.value);
-      setTargetETHPrice(numberFormatText(event.target.value / ethPrice, true));
+      setTargetUsdPrice(event.target.value);
+      setTargetEthPrice(event.target.value / ethPrice);
     }
   };
 
   const handleTargetTWAP = (currency) => (event) => {
     if (currency === 'eth') {
-      setTargetETHTWAP(event.target.value);
-      setTargetUSDTWAP(numberFormatText(event.target.value * ethPrice, true));
+      setTargetEthTwap(event.target.value);
+      setTargetUsdTwap(event.target.value * ethPrice);
     } else {
-      setTargetUSDTWAP(event.target.value);
-      setTargetETHTWAP(numberFormatText(event.target.value / ethPrice, true));
+      setTargetUsdTwap(event.target.value);
+      setTargetEthTwap(event.target.value / ethPrice);
     }
   };
 
@@ -400,13 +387,13 @@ export const PriceImpact = () => {
       setErrorOpen(true)
     };
   } 
-
+// todo here
   const stringToFixed = (val, precision) => {
     const i = val.indexOf('.')
     return Number(i === -1 ? val : val.slice(0, i + precision + 1))
   }
-  let pumpChartData = trades && trades.pump.map(s => ({...s, priceImpact: stringToFixed(s.priceImpact, 3) })) || [];
-  let dumpChartData = trades && trades.dump.map(s => ({...s, priceImpact: stringToFixed(s.priceImpact, 3) })) || [];
+  let pumpChartData = (trades && trades.pump.map(s => ({...s, priceImpact: stringToFixed(s.priceImpact, 3) }))) || [];
+  let dumpChartData = (trades && trades.dump.map(s => ({...s, priceImpact: stringToFixed(s.priceImpact, 3) }))) || [];
 
   const tokenSelectOptions = tokenList.map((t, i) => ({
     ...t,
@@ -430,7 +417,7 @@ export const PriceImpact = () => {
           name: 'amount out',
           value: utils.formatUnits(
             props.payload[0].payload.amountOut,
-            props.payload[0].payload.tokenOut === WETH_ADDRESS ? 18 : getToken().decimals,
+            props.payload[0].payload.tokenOut === WETH_ADDRESS ? 18 : token.decimals,
           ),
         },
         {
@@ -448,7 +435,13 @@ export const PriceImpact = () => {
 
   const SearchResult = ({ result }) => {
     return (
-      <Grid container >
+      <Grid container sx={{ maxWidth: 500 }}>
+        <Grid item xs={4}>
+          Value:
+        </Grid>
+        <Grid item xs={8} mb={1} >
+          ${result.value.toLocaleString()}
+        </Grid>
         {result.targetSpot && (
           <>
             <Grid item xs={4}>
@@ -457,19 +450,19 @@ export const PriceImpact = () => {
             <Grid item xs={8}>
               {result.targetSpot}
             </Grid>
+            <Grid item xs={4}>
+              Target Spot USD:
+            </Grid>
+            <Grid item xs={8} mb={1}>
+              {(result.targetSpot * ethPrice).toLocaleString()}
+            </Grid>
           </>
         )}
-        <Grid item xs={4}>
-          Value:
-        </Grid>
-        <Grid item xs={8}>
-          ${result.value.toLocaleString()}
-        </Grid>
         <Grid item xs={4}>
           Price Impact:
         </Grid>
         <Grid item xs={8}>
-          {result.priceImpact} %
+          {Number(result.priceImpact).toLocaleString()} %
         </Grid>
         <Grid item xs={4}>
           Price ETH:
@@ -480,8 +473,8 @@ export const PriceImpact = () => {
         <Grid item xs={4}>
           Price USD:
         </Grid>
-        <Grid item xs={8}>
-          {result.price * ethPrice}
+        <Grid item xs={8} mb={1}>
+          {(result.price * ethPrice).toLocaleString()}
         </Grid>
         <Grid item xs={4}>
           Cost USD:
@@ -494,21 +487,6 @@ export const PriceImpact = () => {
   }
   const filterOptions = (options, { inputValue }) => {
     return matchSorter(options, inputValue, { keys: ["name", "symbol", "address"] })
-  }
-
-  let minTargetTwapSpotPercentage = '-';
-  let maxTargetTwapSpotPercentage = '-';
-  let twapTargetExceedsMax = false;
-
-  if (currPrice && ethPrice && minTargetTWAPSpot && maxTargetTWAPSpot) {
-    const currPriceFormatted = formatPrice(currPrice, getToken());
-    minTargetTwapSpotPercentage = Decimal.sub(minTargetTWAPSpot, currPriceFormatted).div(currPriceFormatted).mul(100).round().toString();
-    maxTargetTwapSpotPercentage = Decimal.sub(maxTargetTWAPSpot, currPriceFormatted).div(currPriceFormatted).mul(100).round().toString();
-    
-    if (targetETHTWAP) {
-      const t = new Decimal(targetETHTWAP);
-      twapTargetExceedsMax = t.lt(minTargetTWAPSpot) || t.gt(maxTargetTWAPSpot);
-    }
   }
 
   return (
@@ -591,7 +569,7 @@ export const PriceImpact = () => {
               id="target-price-eth"
               label="Target Spot ETH"
               variant="outlined"
-              value={targetETHPrice}
+              value={targetEthPrice}
               onChange={handleTargetPrice('eth')}
               InputLabelProps={{ shrink: true }}
               InputProps={{
@@ -615,7 +593,7 @@ export const PriceImpact = () => {
               id="target-twap-usd"
               label="Target Spot USD"
               variant="outlined"
-              value={targetUSDPrice}
+              value={targetUsdPrice}
               onChange={handleTargetPrice('usd')}
               InputLabelProps={{ shrink: true }}
               InputProps={{
@@ -663,16 +641,16 @@ export const PriceImpact = () => {
               id="target-twap-eth"
               label="Target TWAP ETH"
               variant="outlined"
-              value={targetETHTWAP}
+              value={targetEthTwap}
               onChange={handleTargetTWAP('eth')}
               error={twapTargetExceedsMax}
               InputLabelProps={{ shrink: true }}
               InputProps={{
                 endAdornment: (
                   <IconButton
-                    disabled={!tokenList.length || !ethPrice ||  !currPrice || targetTWAPLoading || twapTargetExceedsMax}
+                    disabled={!tokenList.length || !ethPrice ||  !currPrice || targetTwapLoading || twapTargetExceedsMax}
                     color="primary"
-                    onClick={onTargetTWAP}
+                    onClick={onTargetTwap}
                     sx={{marginLeft: 1}}
                   >
                     <PlayArrowIcon />
@@ -683,9 +661,9 @@ export const PriceImpact = () => {
             </FormControl>
           </Box>
           {/* <Box ml={1} mb={1} sx={{ minWidth: 120, width: 200,  fontSize: 12}}>
-            MIN: {minTargetTWAPSpot} ({minTargetTwapSpotPercentage}%)
+            MIN: {minTargetTwapSpot} ({minTargetTwapSpotPercentage}%)
             <br/>
-            MAX: {maxTargetTWAPSpot} ({maxTargetTwapSpotPercentage}%)
+            MAX: {maxTargetTwapSpot} ({maxTargetTwapSpotPercentage}%)
           </Box> */}
           <Box sx={{ minWidth: 120, width: 200, margin: 1, }}>
             <FormControl fullWidth>
@@ -693,16 +671,16 @@ export const PriceImpact = () => {
               id="target-price-usd"
               label="Target TWAP USD"
               variant="outlined"
-              value={targetUSDTWAP}
+              value={targetUsdTwap}
               error={twapTargetExceedsMax}
               onChange={handleTargetTWAP('usd')}
               InputLabelProps={{ shrink: true }}
               InputProps={{
                 endAdornment: (
                   <IconButton
-                    disabled={!tokenList.length || !ethPrice ||  !currPrice || targetTWAPLoading || twapTargetExceedsMax}
+                    disabled={!tokenList.length || !ethPrice ||  !currPrice || targetTwapLoading || twapTargetExceedsMax}
                     color="primary"
-                    onClick={onTargetTWAP}
+                    onClick={onTargetTwap}
                     sx={{marginLeft: 1}}
                   >
                     <PlayArrowIcon />
@@ -713,9 +691,9 @@ export const PriceImpact = () => {
             </FormControl>
           </Box>
           {/* <Box ml={1} mb={1} sx={{ minWidth: 120, width: 200,  fontSize: 12}}>
-            MIN: {minTargetTWAPSpot * ethPrice} ({minTargetTwapSpotPercentage}%)
+            MIN: {minTargetTwapSpot * ethPrice} ({minTargetTwapSpotPercentage}%)
             <br/>
-            MAX: {maxTargetTWAPSpot * ethPrice} ({maxTargetTwapSpotPercentage}%)
+            MAX: {maxTargetTwapSpot * ethPrice} ({maxTargetTwapSpotPercentage}%)
           </Box> */}
         <Button
           sx={{ minWidth: 120, width: 200, margin: 1, }}
@@ -729,7 +707,7 @@ export const PriceImpact = () => {
         {trades && trades.pump.length > 0 && (
           <CSVLink
             headers={['VALUE', 'PUMP PRICE IMPACT', 'PUMP PRICE', 'DUMP PRICE IMPACT', 'DUMP PRICE']}
-            data={getStandardTrades().map(({ pump, dump }) => pump && dump &&[pump.value, pump.priceImpact, pump.price, dump.priceImpact, dump.price])}
+            data={getStandardTradesTable().map(({ pump, dump }) => pump && dump &&[pump.value, pump.priceImpact, pump.price, dump.priceImpact, dump.price])}
             target="_blank"
             filename={`${symbol}_${fee}.csv`}
             ref={csvLink}
@@ -744,33 +722,32 @@ export const PriceImpact = () => {
                 <Card>
                   <CardContent>
                     <Box display="flex" mb={1}>
-                      <Link target="_blank" href={`https://etherscan.io/token/${getToken().address}`}>
+                      <Link target="_blank" href={`https://etherscan.io/token/${token.address}`}>
                         Token
                       </Link>
-                      <Link ml={1} target="_blank" href={`https://info.uniswap.org/#/pools/${computeUniV3PoolAddress(getToken().address, WETH_ADDRESS, fee).toLowerCase()}`}>
+                      <Link ml={1} target="_blank" href={`https://info.uniswap.org/#/pools/${computeUniV3PoolAddress(token.address, WETH_ADDRESS, fee).toLowerCase()}`}>
                         Pool
                       </Link>
                       <Box display="flex" ml={1}>
-                        Price USD: {formatPrice(currPrice, getToken()) * ethPrice}
+                        Price USD: {formatPrice(currPrice, token) * ethPrice}
                       </Box>
                       <Box display="flex" ml={1}>
-                        Price ETH: {formatPrice(currPrice, getToken())}
+                        Price ETH: {formatPrice(currPrice, token)}
                       </Box>
                     </Box>
                     <Box display="flex" flexDirection="column">
                       <Box display="flex" mb={1}>
-                        Max TWAP targets USD (tick pricing limits)
+                        Max TWAP targets USD (given window, attack blocks and tick pricing limits)
                       </Box>
-                      <Box display="flex">
-                        Pump: {maxTargetTWAPSpot * ethPrice} ({maxTargetTwapSpotPercentage}%)
-                        <br/>
-                        Dump: {minTargetTWAPSpot * ethPrice} ({minTargetTwapSpotPercentage}%)
+                      <Box display="flex" flexDirection="column">
+                        <Box sx={{cursor: 'pointer'}} onClick={onMaxTwapTarget('pump')}>Pump: {maxTargetTwapSpot * ethPrice} ({maxTargetTwapSpotPercentage}%)</Box>
+                        <Box sx={{cursor: 'pointer'}} onClick={onMaxTwapTarget('dump')}>Dump: {minTargetTwapSpot * ethPrice} ({minTargetTwapSpotPercentage}%)</Box>
                       </Box>
                     </Box>
                     {/* <Box display="flex" >
-                      Price USD: {formatPrice(currPrice, getToken()) * ethPrice}
+                      Price USD: {formatPrice(currPrice, token) * ethPrice}
                       <br/>
-                      Price ETH: {formatPrice(currPrice, getToken())}
+                      Price ETH: {formatPrice(currPrice, token)}
                     </Box> */}
                   </CardContent>
                 </Card>
@@ -796,12 +773,12 @@ export const PriceImpact = () => {
                       <Box mb={1}>
                         <b>Target Spot</b>
                       </Box>
-                      <SearchResult result={targetPriceValue.pump || targetPriceValue.pump} />
+                      <SearchResult result={targetPriceValue.pump || targetPriceValue.dump} />
                     </CardContent>
                   </Card>
                 </Box>
               )}
-              {targetTWAPValue && (
+              {targetTwapValue && (
                 <Box mb={1} sx={{width: '100%'}}>
                   <Card mt={1}>
                     <CardContent>
@@ -809,8 +786,8 @@ export const PriceImpact = () => {
                         <b>Target TWAP</b>
                       </Box>
                       <SearchResult result={{
-                        ...(targetTWAPValue.pump || targetTWAPValue.dump),
-                        targetSpot: targetTWAPSpot
+                        ...(targetTwapValue.pump || targetTwapValue.dump),
+                        targetSpot: targetTwapSpot
                       }} />
                     </CardContent>
                   </Card>
@@ -827,7 +804,7 @@ export const PriceImpact = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {getStandardTrades().map((row) => row.pump && (
+                      {getStandardTradesTable().map((row) => row.pump && (
                         <TableRow
                           key={row.pump.value}
                           sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
@@ -843,6 +820,7 @@ export const PriceImpact = () => {
                   </Table>
                 </TableContainer>
               </Box>
+              {/* todo here */}
               {trades && trades.pump.length ===0 && (
                 <Box display="flex" mt={1} mb={1} sx={{color: "red"}} flex>
                   NO LIQUIDITY
@@ -875,7 +853,7 @@ export const PriceImpact = () => {
                   <Legend />
                   {targetPriceImpactValue && <ReferenceLine x={targetPriceImpactValue.pump.value} stroke="red" label="Target Impact" />}
                   {targetPriceValue && targetPriceValue.pump && <ReferenceLine x={targetPriceValue.pump.value} stroke="violet" label="Target Spot" />}
-                  {targetTWAPValue && targetTWAPValue.pump && <ReferenceLine x={targetTWAPValue.pump.value} stroke="green" label="Target TWAP" />}
+                  {targetTwapValue && targetTwapValue.pump && <ReferenceLine x={targetTwapValue.pump.value} stroke="green" label="Target TWAP" />}
                   <Line name="price impact" type="monotone" dataKey="priceImpact" stroke="#8884d8" activeDot={{ r: 8 }} />
                 </LineChart>
                 <LineChart
@@ -902,7 +880,7 @@ export const PriceImpact = () => {
                   <Legend />
                   {targetPriceImpactValue && <ReferenceLine x={targetPriceImpactValue.dump.value} stroke="red" label="Target Impact" />}
                   {targetPriceValue && targetPriceValue.dump && <ReferenceLine x={targetPriceValue.dump.value} stroke="violet" label="Target Spot" />}
-                  {targetTWAPValue && targetTWAPValue.dump && <ReferenceLine x={targetTWAPValue.dump.value} stroke="green" label="Target TWAP" />}
+                  {targetTwapValue && targetTwapValue.dump && <ReferenceLine x={targetTwapValue.dump.value} stroke="green" label="Target TWAP" />}
                   <Line name="price impact" type="monotone" dataKey="priceImpact" stroke="#82ca9d" activeDot={{ r: 8 }} />
                 </LineChart>
               </Box>
