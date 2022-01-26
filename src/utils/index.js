@@ -100,12 +100,11 @@ export const getDump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
       sqrtPriceLimitX96: 0
     });
     let after = sqrtPriceX96ToPrice(quote.sqrtPriceX96After, inverted);
-    // todo here
-    const priceImpact = after.sub(currPrice).mul(utils.parseUnits('1', token.decimals)).div(currPrice);
+    const priceImpact = utils.formatEther(after.sub(currPrice).mul(c1e18).div(currPrice).mul(100));
 
     return {
       value: tradeValueInUSD,
-      priceImpact: utils.formatUnits(priceImpact.mul(100), token.decimals),
+      priceImpact,
       sqrtPriceX96After: quote.sqrtPriceX96After.toString(),
       price: formatPrice(after, token),
       after,
@@ -122,7 +121,6 @@ export const getDump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
 export const getPump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) => {
   if (
     token.address.toLowerCase() === WETH_ADDRESS ||
-    //todo here
     currPrice.eq(0)
   ) return { value: tradeValueInUSD, price: '0', priceImpact: '0' };
 
@@ -140,13 +138,12 @@ export const getPump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
     });
 
     let after = sqrtPriceX96ToPrice(quote.sqrtPriceX96After, inverted);
-    // todo here
-    const priceImpact = after.sub(currPrice).mul(utils.parseUnits('1', token.decimals)).div(currPrice);
+
+    const priceImpact = utils.formatEther(after.sub(currPrice).mul(c1e18).div(currPrice).mul(100));
 
     return {
       value: tradeValueInUSD,
-      // todo here?
-      priceImpact: utils.formatUnits(priceImpact.mul(100), token.decimals),
+      priceImpact,
       sqrtPriceX96After: quote.sqrtPriceX96After.toString(),
       price: formatPrice(after, token),
       after,
@@ -155,7 +152,6 @@ export const getPump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
       gasEstimate: quote.gasEstimate,
     };
   } catch (e) {
-    // todo here
     console.log('e: ', token.symbol, e);
     throw e;
   }
@@ -168,11 +164,11 @@ export const getPumpAndDump = async (currPrice, token, fee, ethPrice, tradeValue
   ]);
   return { pump, dump };
 }
-// todo only price target
+
+// TODO only price target
 export const searchTrade = (currPrice, currSqrtPriceX96, token, fee, ethPrice, target, targetType, direction) => {
   let currPriceFormatted = formatPrice(currPrice, token);
 
-  // todo here
   if (
     (targetType === 'price' &&
     (direction === 'pump' && target.lte(currPriceFormatted) || direction === 'dump' && target.gte(currPriceFormatted)))
@@ -183,7 +179,6 @@ export const searchTrade = (currPrice, currSqrtPriceX96, token, fee, ethPrice, t
     return [];
   }
 
-  // todo here
   let isCancelled = false
   const cancel = () => {
     isCancelled = true
@@ -233,7 +228,6 @@ export const searchTrade = (currPrice, currSqrtPriceX96, token, fee, ethPrice, t
       // best result is to the far right, increase range
       if (i === 0 && best.index === ranges - 2) {
         high *= 1_000_000; // 1000 trillions
-        // todo here?
         low = ticks[ranges - 3];
       } else if (i === 1 && best.index === ranges - 2 && high > 1_000_000_000) { 
         // range was increased already, it's ridiculous to continue
@@ -257,7 +251,6 @@ export const searchTrade = (currPrice, currSqrtPriceX96, token, fee, ethPrice, t
     allTrades = sortBy(allTrades, 'value');
    
     // take the best trade above target if available
-    // todo here
     best = allTrades.find(
       t => targetType === 'priceImpact' || direction === 'pump'
         ? target.lte(Decimal.abs(t[targetType]))
@@ -274,7 +267,6 @@ export const searchTrade = (currPrice, currSqrtPriceX96, token, fee, ethPrice, t
   return [exec(), cancel];
 }
 
-// todo here
 export const binarySearchTradeValues = (currPrice, currSqrtPriceX96, token, fee, ethPrice, target, targetType) => {
   const [execPump, cancelPump] = searchTrade(currPrice, currSqrtPriceX96, token, fee, ethPrice, target, targetType, 'pump');
   const [execDump, cancelDump] = searchTrade(currPrice, currSqrtPriceX96, token, fee, ethPrice, target, targetType, 'dump');
@@ -286,7 +278,6 @@ export const binarySearchTradeValues = (currPrice, currSqrtPriceX96, token, fee,
   return { promise: Promise.all([execPump, execDump]), cancel };
 }
 
-// todo get rid
 export const numberFormatText = (num, noAbbrev = false) => {
   if (Number(num) === 0) {
     return 0
@@ -316,7 +307,6 @@ export const numberFormatText = (num, noAbbrev = false) => {
   }
 }
 
-// todo correct?
 export const formatPrice = (price, token) => {
   return utils.formatEther(BigNumber.from(price).div(BigNumber.from(10).pow(18 - token.decimals)));
 }
