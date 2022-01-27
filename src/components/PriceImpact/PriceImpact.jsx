@@ -51,6 +51,7 @@ import {
   computeUniV3PoolAddress,
   priceToSqrtX96Price,
   sqrtPriceX96ToPrice,
+  isInverted,
 } from "../../utils";
 
 
@@ -82,6 +83,7 @@ export const PriceImpact = () => {
   const [targetTwapLoading, setTargetTwapLoading] = useState(false);
   const [targetTwapValue, setTargetTwapValue] = useState();
   const [targetTwapSpot, setTargetTwapSpot] = useState('');
+  const [targetTwapRatio, setTargetTwapRatio] = useState('');
 
   const [error, setError] = useState();
   const [errorOpen, setErrorOpen] = useState(false);
@@ -153,7 +155,6 @@ export const PriceImpact = () => {
   }
   
   const getCostOfAttack = trade => {
-    console.log('formatPrice(currPrice, token): ', formatPrice(currPrice, token));
     return trade.tokenOut === WETH_ADDRESS
       ? trade.value - utils.formatEther(trade.amountOut) * ethPrice
       : trade.value - utils.formatUnits(trade.amountOut, token.decimals) * formatPrice(currPrice, token) * ethPrice;
@@ -197,12 +198,16 @@ export const PriceImpact = () => {
     if (!tokenList.length || !ethPrice || !currPrice || !poolFees.includes(fee)) return;
 
     setTrades(null);
-    Promise.all(amountsUSD.map(a => getPumpAndDump(currPrice, token, fee, ethPrice, a))).then(res => {
-      setTrades({
-        pump: res.map(r => r.pump),
-        dump: res.map(r => r.dump),
+    Promise.all(amountsUSD.map(a => getPumpAndDump(currPrice, token, fee, ethPrice, a)))
+      .then(res => {
+        setTrades({
+          pump: res.map(r => r.pump),
+          dump: res.map(r => r.dump),
+        });
+      })
+      .catch(() => {
+        handleError('Failed to fetch quotes')
       });
-    });
 
   }, [symbol, fee, poolFees, tokenList, ethPrice, currPrice && currPrice.toString()]);
 
@@ -262,19 +267,28 @@ export const PriceImpact = () => {
   };
 
   const onTargetTwap = () => {
-
     cancelTwapSearch.current();
-
+    
+    const inverted = isInverted(token.address); 
+    // TODO helper
     let currPriceDecimal = new Decimal(utils.formatEther(currPrice.toString()));
 
-    let target = Decimal.mul(targetEthTwap, Decimal.pow(10, 18 - token.decimals));
+    let target = targetEthTwap;
+    target = Decimal.mul(target, Decimal.pow(10, 18 - token.decimals));
+
+    if (inverted) {
+      target = Decimal.div(1, target);
+      currPriceDecimal = Decimal.div(1, currPriceDecimal);
+    }
 
     target = target.pow(window).div(currPriceDecimal.pow(window - attackBlocks)).pow(Decimal.div(1, attackBlocks));
 
-    target = priceToSqrtX96Price(target);
-    setTargetTwapSpot(formatPrice(sqrtPriceX96ToPrice(target.toFixed()), token));
-    console.log('target price ETH:', formatPrice(sqrtPriceX96ToPrice(target.toFixed()), token));
-    console.log('target price USD:', formatPrice(sqrtPriceX96ToPrice(target.toFixed()), token) * ethPrice);
+    target = priceToSqrtX96Price(target).add(2);
+    setTargetTwapRatio(target);
+    setTargetTwapSpot(formatPrice(sqrtPriceX96ToPrice(target.toFixed(), inverted), token));
+    console.log('target sqrtPrice: ', target.toFixed());
+    console.log('target price ETH:', formatPrice(sqrtPriceX96ToPrice(target.toFixed(), inverted), token));
+    console.log('target price USD:', formatPrice(sqrtPriceX96ToPrice(target.toFixed(), inverted), token) * ethPrice);
 
     const { promise, cancel } = binarySearchTradeValues(currPrice, currSqrtPriceX96, token, fee, ethPrice, target, 'sqrtPriceX96After');
     cancelPriceSearch.current = cancel;
@@ -282,6 +296,7 @@ export const PriceImpact = () => {
     promise
       .then(([pump, dump]) => {
         resetResults();
+        if (inverted) [pump, dump] = [dump, pump];
         setTargetTwapValue({pump: pump && pump.best, dump: dump && dump.best});
 
         const standardTrades = getStandardTrades();
@@ -404,26 +419,36 @@ export const PriceImpact = () => {
 
   const CustomTooltip = props => {
     if (props.payload[0] != null) {
+      const payload = props.payload[0].payload;
+      const amountIn = utils.formatUnits(
+        payload.amountIn,
+        payload.tokenOut === WETH_ADDRESS ? token.decimals : 18,
+      );
+      const amountOut = utils.formatUnits(
+        payload.amountOut,
+        payload.tokenOut === WETH_ADDRESS ? 18 : token.decimals,
+      );
       const newPayload = [
         ...props.payload,
         {
           name: 'price ETH',
-          value: props.payload[0].payload.price,
+          value: payload.price,
         },
         {
           name: 'price USD',
-          value: props.payload[0].payload.price * ethPrice,
+          value: payload.price * ethPrice,
+        },
+        {
+          name: 'amount in',
+          value: `${amountIn} ${payload.tokenOut === WETH_ADDRESS ? token.symbol : 'WETH'}`,
         },
         {
           name: 'amount out',
-          value: utils.formatUnits(
-            props.payload[0].payload.amountOut,
-            props.payload[0].payload.tokenOut === WETH_ADDRESS ? 18 : token.decimals,
-          ),
+          value: `${amountOut} ${payload.tokenOut === WETH_ADDRESS ? 'WETH' : token.symbol}`,
         },
         {
           name: 'cost',
-          value: getCostOfAttack(props.payload[0].payload).toLocaleString() + ' USD',
+          value: getCostOfAttack(payload).toLocaleString() + ' USD',
         },
       ];
   

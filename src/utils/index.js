@@ -39,7 +39,8 @@ export const sqrtPriceX96ToPrice = (a, invert) => {
   const scale = BigNumber.from(2).pow(96*2).div(c1e18);
   a = BigNumber.from(a);
   a = a.mul(a).div(scale);
-  if (invert) a = c1e18.mul(c1e18).div(a);
+
+  if (invert && !a.eq(0)) a = c1e18.mul(c1e18).div(a);
   return a;
 }
 
@@ -49,12 +50,13 @@ export const priceToSqrtX96Price = a => {
   return a.mul(Decimal.pow(2, 2*96)).sqrt().floor();
 }
 
+export const isInverted = address => BigNumber.from(address).gt(WETH_ADDRESS)
 
 
 export const getCurrPrice = async (token, fee) => {
   if (token.address.toLowerCase() === WETH_ADDRESS) return BigNumber.from(1);
   try {
-    const inverted = BigNumber.from(token.address).gt(WETH_ADDRESS);
+    const inverted = isInverted(token.address);
     const pool = new Contract(
       computeUniV3PoolAddress(token.address, WETH_ADDRESS, fee),
       poolAbi,
@@ -88,7 +90,7 @@ export const getDump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
   ) return { value: tradeValueInUSD, price: '0', priceImpact: '0' };
 
   try {
-    let inverted = BigNumber.from(token.address).gt(WETH_ADDRESS);
+    let inverted = isInverted(token.address);
     let quote;
 
     let amountIn = utils.parseEther(String(tradeValueInUSD / ethPrice)).mul(c1e18).div(currPrice);
@@ -103,6 +105,7 @@ export const getDump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
     const priceImpact = utils.formatEther(after.sub(currPrice).mul(c1e18).div(currPrice).mul(100));
 
     return {
+      amountIn,
       value: tradeValueInUSD,
       priceImpact,
       sqrtPriceX96After: quote.sqrtPriceX96After.toString(),
@@ -125,7 +128,7 @@ export const getPump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
   ) return { value: tradeValueInUSD, price: '0', priceImpact: '0' };
 
   try {
-    let inverted = BigNumber.from(token.address).gt(WETH_ADDRESS);
+    let inverted = isInverted(token.address);
     let quote;
 
     let amountIn = utils.parseEther(String(tradeValueInUSD / ethPrice));
@@ -142,6 +145,7 @@ export const getPump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
     const priceImpact = utils.formatEther(after.sub(currPrice).mul(c1e18).div(currPrice).mul(100));
 
     return {
+      amountIn,
       value: tradeValueInUSD,
       priceImpact,
       sqrtPriceX96After: quote.sqrtPriceX96After.toString(),
@@ -193,7 +197,11 @@ export const searchTrade = (currPrice, currSqrtPriceX96, token, fee, ethPrice, t
     let allTrades = [] 
     let best;
    
-    const getTrade = direction === 'pump' ? getPump : getDump;
+    // TODO improve this hack
+    const inverted = isInverted(token.address);
+    const adjustedDirection = inverted ? {'pump': 'dump', 'dump': 'pump'}[direction] : direction;
+    const getTrade = adjustedDirection === 'pump' ? getPump : getDump;
+
 
     let i = 0;
     while (high - low > high * tolerance) {
