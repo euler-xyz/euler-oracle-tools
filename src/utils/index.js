@@ -53,7 +53,7 @@ export const priceToSqrtX96Price = a => {
 export const isInverted = address => BigNumber.from(address).gt(WETH_ADDRESS)
 
 
-export const getCurrPrice = async (token, fee) => {
+export const getSlot0 = async (token, fee) => {
   if (token.address.toLowerCase() === WETH_ADDRESS) return BigNumber.from(1);
   try {
     const inverted = isInverted(token.address);
@@ -63,10 +63,13 @@ export const getCurrPrice = async (token, fee) => {
       provider,
     );
 
-    const quote = await pool.slot0();
-    return { price: sqrtPriceX96ToPrice(quote.sqrtPriceX96, inverted), sqrtPriceX96: quote.sqrtPriceX96 }
+    const res = await pool.slot0();
+    return {
+      ...res,
+      price: sqrtPriceX96ToPrice(res.sqrtPriceX96, inverted),
+    }
   } catch (e) {
-    console.log('current price Error: ', market.symbol, e);
+    console.log('current price Error: ', token.symbol, e);
   }
 }
 

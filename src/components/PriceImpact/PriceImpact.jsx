@@ -35,11 +35,13 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Referenc
 import { DefaultTooltipContent } from 'recharts/lib/component/DefaultTooltipContent';
 import { sortBy } from "lodash";
 import { matchSorter } from "match-sorter";
-import { Decimal } from 'decimal.js'
-import { utils } from 'ethers'
+import { Decimal } from 'decimal.js';
+import { utils } from 'ethers';
+
+
 
 import {
-  getCurrPrice,
+  getSlot0,
   getPumpAndDump,
   numberFormatText,
   binarySearchTradeValues,
@@ -55,7 +57,6 @@ import {
 } from "../../utils";
 
 
-
 export const PriceImpact = () => {
   const [tokenList, setTokenList] = useState([]);
   const [symbol, setSymbol] = useState('USDC');
@@ -65,6 +66,8 @@ export const PriceImpact = () => {
   const [trades, setTrades] = useState();
   const [currPrice, setCurrPrice] = useState();
   const [currSqrtPriceX96, setCurrSqrtPriceX96] = useState();
+  const [currTick, setCurrTick] = useState();
+  const [cardinality, setCardinality] = useState();
   const [poolFees, setPoolFees] = useState([]);
 
   const [targetPriceImpact, setTargetPriceImpact] = useState(90);
@@ -123,14 +126,31 @@ export const PriceImpact = () => {
   let minTargetTwapSpot
   let twapTargetExceedsMax = false;
 
-  if (currPrice && ethPrice) {
-    const p = formatPrice(currPrice, token);
+  if (currPrice && ethPrice && currTick) {
+    const p = utils.formatEther(currPrice);
 
+    // const tickPrice = Decimal.pow(1.0001, currTick)
+    // const maxTick = MAX_TICK_PRICE.pow(attackBlocks).mul(Decimal.pow(tickPrice, window - attackBlocks)).pow(Decimal.div(1, window))
+    // const minTick = MIN_TICK_PRICE.pow(attackBlocks).mul(Decimal.pow(tickPrice, window - attackBlocks)).pow(Decimal.div(1, window))
+    // console.log('tickPrice: ', tickPrice.toFixed());
+    // console.log('tickPrice Formatted: ', tickDecimal(tickPrice).toFixed(10));
+    // console.log('maxTick Formatted: ', tickDecimal(maxTick).toFixed(10));
+    
     maxTargetTwapSpot = MAX_TICK_PRICE.pow(attackBlocks).mul(Decimal.pow(p, window - attackBlocks)).pow(Decimal.div(1, window));
+    // console.log('maxTargetTwapSpot: ', maxTargetTwapSpot.toFixed(10));
+    // console.log('maxTick: ', maxTick.toFixed(10));
     minTargetTwapSpot = MIN_TICK_PRICE.pow(attackBlocks).mul(Decimal.pow(p, window - attackBlocks)).pow(Decimal.div(1, window));
+    // console.log('minTargetTwapSpot: ', minTargetTwapSpot.toFixed(100));
+    // console.log('minTick: ', minTick.toFixed(100));
 
-    minTargetTwapSpotPercentage = Decimal.sub(minTargetTwapSpot, p).div(p).mul(100).round().toString();
-    maxTargetTwapSpotPercentage = Decimal.sub(maxTargetTwapSpot, p).div(p).mul(100).round().toString();
+    
+    // minTargetTwapSpotPercentage = Decimal.sub(minTick, tickPrice).div(tickPrice).mul(100).toFixed(2);
+    // maxTargetTwapSpotPercentage = Decimal.sub(maxTick, tickPrice).div(tickPrice).mul(100).toFixed(2);
+    minTargetTwapSpotPercentage = Decimal.sub(minTargetTwapSpot, p).div(p).mul(100).round().toFixed(0);
+    maxTargetTwapSpotPercentage = Decimal.sub(maxTargetTwapSpot, p).div(p).mul(100).round().toFixed(0);
+    
+    maxTargetTwapSpot = maxTargetTwapSpot.div(Decimal.pow(10, 18 - token.decimals));
+    minTargetTwapSpot = minTargetTwapSpot.div(Decimal.pow(10, 18 - token.decimals));
 
     if (targetEthTwap) {
       const t = new Decimal(targetEthTwap);
@@ -184,9 +204,11 @@ export const PriceImpact = () => {
   useEffect(() => {
     if (!tokenList.length || !ethPrice || !poolFees.includes(fee)) return;
 
-    getCurrPrice(token, fee).then(({ price, sqrtPriceX96 }) => {
+    getSlot0(token, fee).then(({ price, sqrtPriceX96, tick, observationCardinality }) => {
       setCurrPrice(price);
       setCurrSqrtPriceX96(sqrtPriceX96.toString());
+      setCurrTick(tick);
+      setCardinality(observationCardinality);
       setTargetEthPrice(formatPrice(price, token));
       setTargetUsdPrice(formatPrice(price, token) * ethPrice);
       setTargetEthTwap(formatPrice(price, token));
@@ -747,7 +769,7 @@ export const PriceImpact = () => {
               <Box sx={{width: '100%'}} mb={1}>
                 <Card>
                   <CardContent>
-                    <Box display="flex" mb={1}>
+                    <Box display="flex">
                       <Link target="_blank" href={`https://etherscan.io/token/${token.address}`}>
                         Token
                       </Link>
@@ -755,6 +777,14 @@ export const PriceImpact = () => {
                         Pool
                       </Link>
                       <Box display="flex" ml={1}>
+                        Tick: {currTick}
+                      </Box>
+                      <Box display="flex" ml={1}>
+                        Cardinality: {cardinality}
+                      </Box>
+                    </Box>
+                    <Box display="flex" mb={1}>
+                      <Box display="flex" >
                         Price USD: {formatPrice(currPrice, token) * ethPrice}
                       </Box>
                       <Box display="flex" ml={1}>
