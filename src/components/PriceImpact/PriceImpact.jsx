@@ -361,7 +361,7 @@ export const PriceImpact = () => {
     setTargetPriceValue(null);
     setTargetTwapValue(null);
     setFee(3000);
-    setPoolFees([]);
+    // setPoolFees([]);
   };
 
   const handleToken = (option) => {
