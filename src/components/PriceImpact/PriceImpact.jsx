@@ -59,7 +59,7 @@ import {
 
 export const PriceImpact = () => {
   const [tokenList, setTokenList] = useState([]);
-  const [symbol, setSymbol] = useState('USDC');
+  const [tokenName, setTokenName] = useState('USD Coin');
 
   const [fee, setFee] = useState(3000);
   const [ethPrice, setEthPrice] = useState(0);
@@ -96,7 +96,7 @@ export const PriceImpact = () => {
   const cancelTwapSearch = useRef(() => {});
   const csvLink = useRef();
 
-  const token = tokenList.length > 0 && tokenList.find(t => t.symbol === symbol)
+  const token = tokenList.length > 0 && tokenList.find(t => t.name === tokenName)
 
   const amountsUSD = [
     100_000,
@@ -199,7 +199,7 @@ export const PriceImpact = () => {
       setPoolFees(fees);
       setFee(fees.includes(3000) ? 3000 : fees[0]);
     });
-  }, [symbol, tokenList, ethPrice]);
+  }, [tokenName, tokenList, ethPrice]);
 
   useEffect(() => {
     if (!tokenList.length || !ethPrice || !poolFees.includes(fee)) return;
@@ -214,7 +214,7 @@ export const PriceImpact = () => {
       setTargetEthTwap(formatPrice(price, token));
       setTargetUsdTwap(formatPrice(price, token) * ethPrice);
     });
-  }, [symbol, fee, poolFees, tokenList, ethPrice]);
+  }, [tokenName, fee, poolFees, tokenList, ethPrice]);
 
   useEffect(() => {
     if (!tokenList.length || !ethPrice || !currPrice || !poolFees.includes(fee)) return;
@@ -231,7 +231,7 @@ export const PriceImpact = () => {
         handleError('Failed to fetch quotes')
       });
 
-  }, [symbol, fee, poolFees, tokenList, ethPrice, currPrice && currPrice.toString()]);
+  }, [tokenName, fee, poolFees, tokenList, ethPrice, currPrice && currPrice.toString()]);
 
   const onTargetPriceImpact = () => {
     cancelPriceImpactSearch.current();
@@ -367,7 +367,7 @@ export const PriceImpact = () => {
   const handleToken = (option) => {
     if (!option) return;
     resetMarket();
-    setSymbol(option.symbol);
+    setTokenName(option.name);
   };
 
   const handleFee = (event) => {
@@ -437,7 +437,7 @@ export const PriceImpact = () => {
     ...t,
     label: tokenList.filter(a => a.symbol === t.symbol).length > 1 ? `${t.symbol} ${t.name}` : t.symbol,
   }));
-  const tokenSelectValue = tokenSelectOptions.find(o => o.symbol === symbol) || {label: ""};
+  const tokenSelectValue = tokenSelectOptions.find(o => o.name === tokenName) || {label: ""};
 
   const CustomTooltip = props => {
     if (props.payload[0] != null) {
@@ -549,7 +549,7 @@ export const PriceImpact = () => {
                 filterOptions={filterOptions}
                 renderInput={(params) => <TextField {...params} label="Token" />}
                 value={tokenSelectValue}
-                isOptionEqualToValue={(a, b) => a.symbol === b.symbol}
+                isOptionEqualToValue={(a, b) => a.name === b.name}
                 onChange={(event, option) => handleToken(option)}
               />
             </FormControl>
@@ -757,7 +757,7 @@ export const PriceImpact = () => {
             headers={['VALUE', 'PUMP PRICE IMPACT', 'PUMP PRICE', 'DUMP PRICE IMPACT', 'DUMP PRICE']}
             data={getStandardTradesTable().map(({ pump, dump }) => pump && dump &&[pump.value, pump.priceImpact, pump.price, dump.priceImpact, dump.price])}
             target="_blank"
-            filename={`${symbol}_${fee}.csv`}
+            filename={`${tokenName}_${fee}.csv`}
             ref={csvLink}
           />
         )}

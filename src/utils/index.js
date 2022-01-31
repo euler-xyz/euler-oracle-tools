@@ -119,7 +119,7 @@ export const getDump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
       gasEstimate: quote.gasEstimate,
     };
   } catch (e) {
-    console.log('e: ', token.symbol, e);
+    console.log('e dump: ', token.symbol, e);
     throw e;
   }
 }
@@ -159,7 +159,7 @@ export const getPump = async (currPrice, token, fee, ethPrice, tradeValueInUSD) 
       gasEstimate: quote.gasEstimate,
     };
   } catch (e) {
-    console.log('e: ', token.symbol, e);
+    console.log('e pump: ', token.symbol, e);
     throw e;
   }
 }
