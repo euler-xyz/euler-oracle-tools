@@ -238,7 +238,7 @@ export const PriceImpact = () => {
         config,
       ] = await Promise.all([
         getSlot0(token, fee),
-        getMarketConfig(token.address),
+        // getMarketConfig(token.address),
       ]);
 
       // const profile = await getLiquidityProfile(token, fee);
@@ -251,7 +251,7 @@ export const PriceImpact = () => {
       setTargetUsdPrice(formatPrice(price, token) * ethPrice);
       setTargetEthTwap(formatPrice(price, token));
       setTargetUsdTwap(formatPrice(price, token) * ethPrice);
-      setMarketConfig(config);
+      // setMarketConfig(config);
 
       // setLiquidityProfile(profile);
       // setLiquidityChartData(parseLiquidityRange(profile, currTick, token, ethPrice, price, 300, 300));
