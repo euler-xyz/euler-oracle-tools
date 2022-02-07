@@ -482,6 +482,7 @@ export const PriceImpact = () => {
       } finally {
         console.timeEnd('report');
         setReportLoading(false);
+        setReportProgress(0);
       }
     };
     // setTimeout(() => {
