@@ -11,9 +11,11 @@
     "@testing-library/jest-dom": "^5.16.1",
     "@testing-library/react": "^12.1.2",
     "@testing-library/user-event": "^13.5.0",
+    "@uniswap/v3-sdk": "^3.8.1",
     "axios": "^0.24.0",
     "decimal.js": "^10.3.1",
     "ethers": "^5.5.3",
+    "jsbi": "^4.1.0",
     "lodash": "^4.17.21",
     "match-sorter": "^6.3.1",
     "react": "^17.0.2",
@@ -25,7 +27,7 @@
   },
   "scripts": {
     "start": "env-cmd -f .env react-scripts start",
-    "build": "env-cmd -f .env react-scripts build",
+    "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

@@ -29,15 +29,17 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Grid from '@mui/material/Grid';
 import Divider from '@mui/material/Divider';
+import Typography from '@mui/material/Typography';
 
 import { CSVLink } from "react-csv";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, BarChart, Bar } from 'recharts';
 import { DefaultTooltipContent } from 'recharts/lib/component/DefaultTooltipContent';
 import { sortBy } from "lodash";
 import { matchSorter } from "match-sorter";
 import { Decimal } from 'decimal.js';
 import { utils } from 'ethers';
 
+// import reportJson from '../../report.json'
 
 
 import {
@@ -50,16 +52,26 @@ import {
   MAX_TICK_PRICE,
   MIN_TICK_PRICE,
   WETH_ADDRESS,
+  TICK_SPACINGS,
   computeUniV3PoolAddress,
   priceToSqrtX96Price,
   sqrtPriceX96ToPrice,
   isInverted,
+  getMarketConfig,
+  getTwapTargetRatio,
+  getTwapAfterAttack,
+  getLiquidityProfile,
+  getLiquidityStats,
+  parseLiquidityRange,
 } from "../../utils";
+import { LiquidityChart } from './LiquidityChart/LiquidityChart';
 
 
 export const PriceImpact = () => {
   const [tokenList, setTokenList] = useState([]);
   const [tokenName, setTokenName] = useState('USD Coin');
+  // const [tokenName, setTokenName] = useState('Magic Internet Mone');
+  // console.log('tokenName: ', tokenName);
 
   const [fee, setFee] = useState(3000);
   const [ethPrice, setEthPrice] = useState(0);
@@ -86,10 +98,23 @@ export const PriceImpact = () => {
   const [targetTwapLoading, setTargetTwapLoading] = useState(false);
   const [targetTwapValue, setTargetTwapValue] = useState();
   const [targetTwapSpot, setTargetTwapSpot] = useState('');
-  const [targetTwapRatio, setTargetTwapRatio] = useState('');
+
+  const [reportBorrowFactor, setReportBorrowFactor] = useState(0.91)
+  const [reportCollateralFactor, setReportCollateralFactor] = useState(0.88)
 
   const [error, setError] = useState();
   const [errorOpen, setErrorOpen] = useState(false);
+
+  const [usdcMarketConfig, setUsdcMarketConfig] = useState();
+  const [marketConfig, setMarketConfig] = useState();
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportData, setReportData] = useState();
+  const [reportLoading, setReportLoading] = useState(true);
+  const [reportProgress, setReportProgress] = useState(0);
+
+  const [liquidityProfile, setLiquidityProfile] = useState();
+  const [liquidityChartData, setLiquidityChartData] = useState();
+  const [liquidityStats, setLiquidityStats] = useState();
 // todo here
   const cancelPriceImpactSearch = useRef(() => {});
   const cancelPriceSearch = useRef(() => {});
@@ -98,6 +123,7 @@ export const PriceImpact = () => {
 
   const token = tokenList.length > 0 && tokenList.find(t => t.name === tokenName)
 
+  const usdcAddress = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
   const amountsUSD = [
     100_000,
     200_000,
@@ -136,10 +162,10 @@ export const PriceImpact = () => {
     // console.log('tickPrice Formatted: ', tickDecimal(tickPrice).toFixed(10));
     // console.log('maxTick Formatted: ', tickDecimal(maxTick).toFixed(10));
     
-    maxTargetTwapSpot = MAX_TICK_PRICE.pow(attackBlocks).mul(Decimal.pow(p, window - attackBlocks)).pow(Decimal.div(1, window));
+    maxTargetTwapSpot = getTwapAfterAttack(MAX_TICK_PRICE, p, window, attackBlocks);
     // console.log('maxTargetTwapSpot: ', maxTargetTwapSpot.toFixed(10));
     // console.log('maxTick: ', maxTick.toFixed(10));
-    minTargetTwapSpot = MIN_TICK_PRICE.pow(attackBlocks).mul(Decimal.pow(p, window - attackBlocks)).pow(Decimal.div(1, window));
+    minTargetTwapSpot = getTwapAfterAttack(MIN_TICK_PRICE, p, window, attackBlocks); MIN_TICK_PRICE.pow(attackBlocks).mul(Decimal.pow(p, window - attackBlocks)).pow(Decimal.div(1, window));
     // console.log('minTargetTwapSpot: ', minTargetTwapSpot.toFixed(100));
     // console.log('minTick: ', minTick.toFixed(100));
 
@@ -184,10 +210,12 @@ export const PriceImpact = () => {
     Promise.all([
       axios.get('https://raw.githubusercontent.com/euler-xyz/euler-tokenlist/master/euler-tokenlist.json'),
       axios.get(`https://min-api.cryptocompare.com/data/price?fsym=ETH&tsyms=USD`),
+      getMarketConfig(usdcAddress),
     ])
-    .then(([result1, result2]) => {
+    .then(([result1, result2, result3]) => {
       setTokenList(sortBy(result1.data.tokens, 'symbol'));
       setEthPrice(Number(result2.data.USD));
+      setUsdcMarketConfig(result3);
     });
   }, []);
 
@@ -204,7 +232,17 @@ export const PriceImpact = () => {
   useEffect(() => {
     if (!tokenList.length || !ethPrice || !poolFees.includes(fee)) return;
 
-    getSlot0(token, fee).then(({ price, sqrtPriceX96, tick, observationCardinality }) => {
+    const getMarket = async () => {
+      const [
+        { price, sqrtPriceX96, tick, observationCardinality },
+        config,
+      ] = await Promise.all([
+        getSlot0(token, fee),
+        getMarketConfig(token.address),
+      ]);
+
+      // const profile = await getLiquidityProfile(token, fee);
+
       setCurrPrice(price);
       setCurrSqrtPriceX96(sqrtPriceX96.toString());
       setCurrTick(tick);
@@ -213,7 +251,12 @@ export const PriceImpact = () => {
       setTargetUsdPrice(formatPrice(price, token) * ethPrice);
       setTargetEthTwap(formatPrice(price, token));
       setTargetUsdTwap(formatPrice(price, token) * ethPrice);
-    });
+      setMarketConfig(config);
+
+      // setLiquidityProfile(profile);
+      // setLiquidityChartData(parseLiquidityRange(profile, currTick, token, ethPrice, price, 300, 300));
+    }
+    getMarket();
   }, [tokenName, fee, poolFees, tokenList, ethPrice]);
 
   useEffect(() => {
@@ -291,22 +334,13 @@ export const PriceImpact = () => {
   const onTargetTwap = () => {
     cancelTwapSearch.current();
     
-    const inverted = isInverted(token.address); 
     // TODO helper
     let currPriceDecimal = new Decimal(utils.formatEther(currPrice.toString()));
+    const inverted = isInverted(token.address);
+    const targetEthTwapScaled = Decimal.mul(targetEthTwap, Decimal.pow(10, 18 - token.decimals));
 
-    let target = targetEthTwap;
-    target = Decimal.mul(target, Decimal.pow(10, 18 - token.decimals));
+    const target = getTwapTargetRatio(targetEthTwapScaled, token, currPriceDecimal, window, attackBlocks)
 
-    if (inverted) {
-      target = Decimal.div(1, target);
-      currPriceDecimal = Decimal.div(1, currPriceDecimal);
-    }
-
-    target = target.pow(window).div(currPriceDecimal.pow(window - attackBlocks)).pow(Decimal.div(1, attackBlocks));
-
-    target = priceToSqrtX96Price(target).add(2);
-    setTargetTwapRatio(target);
     setTargetTwapSpot(formatPrice(sqrtPriceX96ToPrice(target.toFixed(), inverted), token));
     console.log('target sqrtPrice: ', target.toFixed());
     console.log('target price ETH:', formatPrice(sqrtPriceX96ToPrice(target.toFixed(), inverted), token));
@@ -318,7 +352,6 @@ export const PriceImpact = () => {
     promise
       .then(([pump, dump]) => {
         resetResults();
-        if (inverted) [pump, dump] = [dump, pump];
         setTargetTwapValue({pump: pump && pump.best, dump: dump && dump.best});
 
         const standardTrades = getStandardTrades();
@@ -337,6 +370,131 @@ export const PriceImpact = () => {
 
     return () => cancelTwapSearch.current();
   };
+
+  const onReport = () => {
+    setReportOpen(true);
+    setReportLoading(true);
+
+    const runReport = async () => {
+      const currPriceDecimal = new Decimal(utils.formatEther(currPrice.toString()));
+      const breakEvenPumpTwapChange = 1 / (reportCollateralFactor * usdcMarketConfig.borrowFactor) - 1;
+      const breakEvenDumpTwapChange = breakEvenPumpTwapChange; // 1 / (reportBorrowFactor * usdcMarketConfig.collateralFactor) - 1;
+
+      const inverted = isInverted(token.address); 
+
+      let progress = 0;
+      const attackBlocksReport = async attackB => {
+          const p = utils.formatEther(currPrice);
+          const maxTwapPump = getTwapAfterAttack(MAX_TICK_PRICE, p, window, attackB);
+          const maxTwapDump = getTwapAfterAttack(MIN_TICK_PRICE, p, window, attackB);
+          const targetTwapPump = currPriceDecimal.mul(1 + breakEvenPumpTwapChange);
+          const targetTwapDump = currPriceDecimal.mul(1 - breakEvenDumpTwapChange);
+
+          let pumpAction;
+          let dumpAction;
+          if (targetTwapPump.gt(maxTwapPump)) {
+            pumpAction = Promise.reject('max_target');
+          } else {
+            const targetRatioPump = getTwapTargetRatio(targetTwapPump, token, currPriceDecimal, window, attackB);
+            const { promise, cancel: cancelPump } =
+              binarySearchTradeValues(currPrice, currSqrtPriceX96, token, fee, ethPrice, targetRatioPump, 'sqrtPriceX96After');
+            pumpAction = promise;
+
+            console.log('PUMP target sqrtPrice: ', targetRatioPump.toFixed());
+            console.log('PUMP target price ETH:', formatPrice(sqrtPriceX96ToPrice(targetRatioPump.toFixed(), inverted), token));
+            console.log('PUMP target price USD:', formatPrice(sqrtPriceX96ToPrice(targetRatioPump.toFixed(), inverted), token) * ethPrice);
+          }
+          
+          if (targetTwapDump.lt(maxTwapDump)) {
+            dumpAction = Promise.reject('max_target');
+          } else {
+            const targetRatioDump = getTwapTargetRatio(targetTwapDump, token, currPriceDecimal, window, attackB);
+            let { promise, cancel: cancelDump } =
+              binarySearchTradeValues(currPrice, currSqrtPriceX96, token, fee, ethPrice, targetRatioDump, 'sqrtPriceX96After');
+            dumpAction = promise;
+            console.log('DUMP target sqrtPrice: ', targetRatioDump.toFixed());
+            console.log('DUMP target price ETH:', formatPrice(sqrtPriceX96ToPrice(targetRatioDump.toFixed(), inverted), token));
+            console.log('DUMP target price USD:', formatPrice(sqrtPriceX96ToPrice(targetRatioDump.toFixed(), inverted), token) * ethPrice);
+          }
+
+          // todo handle cancel, improve search direction
+          const res = await Promise.allSettled([pumpAction, dumpAction]);
+          
+          progress += 10;
+          setReportProgress(progress);
+          return res;
+      }
+      try {
+        let res = [];
+
+        // more than 2-3 parallel searches cause timeouts 
+        res.push(
+          ...await Promise.all([
+            attackBlocksReport(1),
+            attackBlocksReport(2),
+          ])
+        );
+        res.push(
+          ...await Promise.all([
+            attackBlocksReport(3),
+            attackBlocksReport(4),
+          ])
+        );
+        res.push(
+          ...await Promise.all([
+            attackBlocksReport(5),
+            attackBlocksReport(6),
+          ])
+        );
+        res.push(
+          ...await Promise.all([
+            attackBlocksReport(7),
+            attackBlocksReport(8),
+          ])
+        );
+        res.push(
+          ...await Promise.all([
+            attackBlocksReport(9),
+            attackBlocksReport(10),
+          ])
+        );
+
+        res = res.map(([pump, dump], i) => {
+          const getSettled = (r, valIndex) => {
+            if (r.status !== 'fulfilled') {
+              if (r.reason === 'max_target') return r.reason;
+              if (r.reason.message.includes('Max trade value exceeded')) return 'max_trade';
+              throw r.reason;
+            }
+            return r.value[valIndex];
+          }
+          return {
+            blocks: i + 1,
+            pump: getSettled(pump, 0),
+            dump: getSettled(dump, 1),
+          }
+        })
+        setReportData(res);
+        // console.log('allResults: ', JSON.stringify(res, null, 2));
+      } catch (e) {
+        handleError(e.message.includes('context deadline exceeded') ? 'Provider timeout. Try again...' : e);
+        setReportOpen(false);
+      } finally {
+        console.timeEnd('report');
+        setReportLoading(false);
+      }
+    };
+    // setTimeout(() => {
+    //   const stats = getLiquidityStats(liquidityProfile, currTick, token, fee, currPrice, ethPrice);
+    //   console.log('stats: ', JSON.stringify(stats, null, 2));
+    //   setLiquidityStats(stats);
+    // })
+      
+    console.time('report')
+    runReport();
+    // setReportLoading(false);
+    // setReportData(reportJson);
+  }
 
   const onMaxTwapTarget = (direction) => () => {
     if (direction === 'pump') {
@@ -361,6 +519,9 @@ export const PriceImpact = () => {
     setTargetPriceValue(null);
     setTargetTwapValue(null);
     setFee(3000);
+    setLiquidityProfile(null);
+    setLiquidityChartData(null);
+    setLiquidityStats(null);
     // setPoolFees([]);
   };
 
@@ -415,20 +576,32 @@ export const PriceImpact = () => {
     setTargetPriceImpact(event.target.value);
   }
 
+  const handleReportBorrowFactor = (event) => {
+    setReportBorrowFactor(event.target.value);
+  }
+
+  const handleReportCollateralFactor = (event) => {
+    setReportCollateralFactor(event.target.value);
+  }
+
+  const handleReportClose = () => {
+    setReportOpen(false);
+  }
+
   const handleErrorClose = () => {
-    setErrorOpen(false)
+    setErrorOpen(false);
   }
 
   const handleError = (e) => {
     if (e.message !== 'cancelled') {
-      setError(e.message || e)
-      setErrorOpen(true)
-    };
+      setError(e.message || e);
+      setErrorOpen(true);
+    }
   } 
 // todo here
   const stringToFixed = (val, precision) => {
-    const i = val.indexOf('.')
-    return Number(i === -1 ? val : val.slice(0, i + precision + 1))
+    const i = val.indexOf('.');
+    return Number(i === -1 ? val : val.slice(0, i + precision + 1));
   }
   let pumpChartData = (trades && trades.pump.map(s => ({...s, priceImpact: stringToFixed(s.priceImpact, 3) }))) || [];
   let dumpChartData = (trades && trades.dump.map(s => ({...s, priceImpact: stringToFixed(s.priceImpact, 3) }))) || [];
@@ -708,11 +881,6 @@ export const PriceImpact = () => {
             />
             </FormControl>
           </Box>
-          {/* <Box ml={1} mb={1} sx={{ minWidth: 120, width: 200,  fontSize: 12}}>
-            MIN: {minTargetTwapSpot} ({minTargetTwapSpotPercentage}%)
-            <br/>
-            MAX: {maxTargetTwapSpot} ({maxTargetTwapSpotPercentage}%)
-          </Box> */}
           <Box sx={{ minWidth: 120, width: 200, margin: 1, }}>
             <FormControl fullWidth>
             <TextField
@@ -738,11 +906,6 @@ export const PriceImpact = () => {
             />
             </FormControl>
           </Box>
-          {/* <Box ml={1} mb={1} sx={{ minWidth: 120, width: 200,  fontSize: 12}}>
-            MIN: {minTargetTwapSpot * ethPrice} ({minTargetTwapSpotPercentage}%)
-            <br/>
-            MAX: {maxTargetTwapSpot * ethPrice} ({maxTargetTwapSpotPercentage}%)
-          </Box> */}
         <Button
           sx={{ minWidth: 120, width: 200, margin: 1, }}
           disabled={!trades}
@@ -761,6 +924,43 @@ export const PriceImpact = () => {
             ref={csvLink}
           />
         )}
+        <Grid container sx={{width: 200, margin: 1, marginTop: 1}} >
+          <Grid item xs={6}>
+            <FormControl >
+            <TextField
+              id="report-bf"
+              label="BF"
+              variant="outlined"
+              value={reportBorrowFactor}
+              error={reportBorrowFactor > 1}
+              onChange={handleReportBorrowFactor}
+              InputLabelProps={{ shrink: true }}
+            />
+            </FormControl>
+          </Grid>
+          <Grid item xs={6}>
+            <FormControl >
+            <TextField
+              id="report-cf"
+              label="CF"
+              variant="outlined"
+              value={reportCollateralFactor}
+              error={reportCollateralFactor > 1}
+              onChange={handleReportCollateralFactor}
+              InputLabelProps={{ shrink: true }}
+            />
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} mt={1}>
+            <Button
+              sx={{width: '100%'}}
+              variant="contained"
+              onClick={onReport}
+            >
+              Generate Report
+            </Button>
+          </Grid>
+        </Grid>
       </Box>
       {trades
         ? (
@@ -800,11 +1000,6 @@ export const PriceImpact = () => {
                         <Box sx={{cursor: 'pointer'}} onClick={onMaxTwapTarget('dump')}>Dump: {minTargetTwapSpot * ethPrice} ({minTargetTwapSpotPercentage}%)</Box>
                       </Box>
                     </Box>
-                    {/* <Box display="flex" >
-                      Price USD: {formatPrice(currPrice, token) * ethPrice}
-                      <br/>
-                      Price ETH: {formatPrice(currPrice, token)}
-                    </Box> */}
                   </CardContent>
                 </Card>
               </Box>
@@ -855,8 +1050,8 @@ export const PriceImpact = () => {
                     <TableHead>
                       <TableRow>
                         <TableCell>USD VALUE</TableCell>
-                        <TableCell align="right">PUMP PERCENTAGE</TableCell>
-                        <TableCell align="right">DUMP PERCENTAGE</TableCell>
+                        <TableCell align="right">PUMP SPOT IMPACT</TableCell>
+                        <TableCell align="right">DUMP SPOT IMPACT</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -939,6 +1134,15 @@ export const PriceImpact = () => {
                   {targetTwapValue && targetTwapValue.dump && <ReferenceLine x={targetTwapValue.dump.value} stroke="green" label="Target TWAP" />}
                   <Line name="price impact" type="monotone" dataKey="priceImpact" stroke="#82ca9d" activeDot={{ r: 8 }} />
                 </LineChart>
+                {/* {liquidityProfile && (
+                  <LiquidityChart
+                    tick={currTick}
+                    data={liquidityChartData}
+                    tickSpacing={TICK_SPACINGS[fee]}
+                    width={900}
+                    height= {300}
+                  />
+                )} */}
               </Box>
             )}
           </>
@@ -952,8 +1156,6 @@ export const PriceImpact = () => {
       <Dialog
         open={errorOpen}
         onClose={handleErrorClose}
-        aria-labelledby="alert-dialog-title"
-        aria-describedby="alert-dialog-description"
       >
         <DialogTitle id="alert-dialog-title">
           ERROR
@@ -965,6 +1167,203 @@ export const PriceImpact = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleErrorClose}>OK</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={reportOpen}
+        onClose={handleErrorClose}
+        fullScreen
+        maxWidth="lg"
+      >
+        <DialogTitle id="report-dialog-title">
+          <b>{token.symbol} / WETH {fee / 10000}%</b>
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="report-dialog-description">
+          </DialogContentText>
+          {reportLoading && (
+            <Box sx={{width: '100%', height: '100%'}} display="flex" justifyContent="center" alignItems="center">
+              <CircularProgress variant="determinate" value={reportProgress} />
+              <Box
+                sx={{
+                  top: 0,
+                  left: 0,
+                  bottom: 0,
+                  right: 0,
+                  position: 'absolute',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Typography variant="caption" component="div" color="text.secondary">
+                  {`${Math.round(reportProgress)}%`}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+          {!reportLoading && (
+            <Box display="flex" sx={{height: '100%'}}>
+              <Box display="flex" flexDirection="column">
+                <Grid container sx={{ maxWidth: 500 }} mb={2}>
+                  <Grid item xs={8}>
+                    TWAP Window:
+                  </Grid>
+                  <Grid item xs={4}>
+                    {window}
+                  </Grid>
+                  <Grid item xs={8}>
+                    Collateral Factor:
+                  </Grid>
+                  <Grid item xs={4}>
+                    {reportCollateralFactor}
+                  </Grid>
+                  <Grid item xs={8}>
+                    Borrow Factor:
+                  </Grid>
+                  <Grid item xs={4}>
+                    {reportBorrowFactor}
+                  </Grid>
+                  <Grid item xs={8}>
+                    TWAP Pump Impact Target:
+                  </Grid>
+                  <Grid item xs={4}>
+                    {numberFormatText((1 / (reportCollateralFactor * usdcMarketConfig.borrowFactor) - 1) * 100)}%
+                  </Grid>
+                  <Grid item xs={8}>
+                    TWAP Dump Impact Target:
+                  </Grid>
+                  <Grid item xs={4}>
+                    {numberFormatText((1 / (reportCollateralFactor * usdcMarketConfig.borrowFactor) - 1) * 100)}%
+                  </Grid>
+                </Grid>
+                <TableContainer component={Paper}>
+                  <Table sx={{ width: 800 }} size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>BLOCKS</TableCell>
+                        <TableCell align="right">{String.fromCharCode(8657)} VALUE USD</TableCell>
+                        <TableCell align="right">{String.fromCharCode(8657)} COST USD</TableCell>
+                        <TableCell align="right">{String.fromCharCode(8657)} TOTAL COST USD</TableCell>
+                        <TableCell align="right">{String.fromCharCode(8659)} VALUE USD</TableCell>
+                        <TableCell align="right">{String.fromCharCode(8659)} COST USD</TableCell>
+                        <TableCell align="right">{String.fromCharCode(8659)} TOTAL COST USD</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {reportData.map((row, i) => (
+                        <TableRow
+                          key={`report-row-${i}`}
+                          sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                        >
+                          <TableCell component="th" scope="row" key={Math.random()}>
+                            {i + 1}
+                          </TableCell>
+                          <TableCell align="right" key={Math.random()}>
+                            {row.pump.best ? numberFormatText(row.pump.best.value) : row.pump}
+                          </TableCell>
+                          <TableCell align="right" key={Math.random()}>
+                            {row.pump.best ? numberFormatText(getCostOfAttack(row.pump.best)) : row.pump}
+                          </TableCell>
+                          <TableCell align="right" key={Math.random()}>
+                            {row.pump.best ? numberFormatText(getCostOfAttack(row.pump.best) * (i + 1)) : row.pump}
+                          </TableCell>
+                          <TableCell align="right" key={Math.random()}>
+                            {row.dump.best ? numberFormatText(row.dump.best.value) : row.dump}
+                          </TableCell>
+                          <TableCell align="right" key={Math.random()}>
+                            {row.dump.best ? numberFormatText(getCostOfAttack(row.dump.best)) : row.dump}
+                          </TableCell>
+                          <TableCell align="right" key={Math.random()}>
+                            {row.dump.best ? numberFormatText(getCostOfAttack(row.dump.best) * (i + 1)) : row.dump}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+              <Box display="flex" flexDirection="column">
+                <BarChart
+                  width={700}
+                  height={350}
+                  data={reportData.map((row, i) => ({
+                    blocks: i + 1,
+                    "total pump value": row.pump.best ? row.pump.best.value * (i + 1) : 0,
+                    "total pump cost": row.pump.best ? getCostOfAttack(row.pump.best) * (i + 1) : 0,
+                  }))}
+                  margin={{
+                    top: 5,
+                    right: 30,
+                    left: 40,
+                    bottom: 5,
+                  }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis tick={false} dataKey="blocks"  type="number" domain={['dataMin - 1', 'dataMax + 1']}/>
+                  <YAxis
+                    scale="log"
+                    type="number"
+                    domain={['dataMin', dataMax => dataMax * 2]}
+                    tickFormatter={(tick) => {
+                      return numberFormatText(tick)
+                    }}
+                  />
+                  <Tooltip 
+                    labelFormatter={v => v + ' Blocks'}
+                    formatter={(value, name) => [numberFormatText(value), name]}
+                  />
+                  <Legend />
+                  <Bar dataKey="total pump value" fill="#8884d8" />
+                  <Bar dataKey="total pump cost" fill="#82ca9d" />
+                </BarChart>
+                <BarChart
+                  width={700}
+                  height={350}
+                  data={reportData.filter(row => row.dump.best).map((row, i) => ({
+                    blocks: row.blocks,
+                    "total dump value": row.dump.best ? row.dump.best.value * (i + 1) : 0,
+                    "total dump cost": row.dump.best ? getCostOfAttack(row.dump.best) * (i + 1) : 0,
+                  }))}
+                  margin={{
+                    top: 5,
+                    right: 30,
+                    left: 40,
+                    bottom: 5,
+                  }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis tick={false} dataKey="blocks"  type="number" domain={['dataMin - 1', 'dataMax + 1']}/>
+                  <YAxis
+                    scale="log"
+                    type="number"
+                    domain={['dataMin', dataMax => dataMax * 2]}
+                    tickFormatter={(tick) => {
+                      return numberFormatText(tick)
+                    }}
+                  />
+                  <Tooltip 
+                    labelFormatter={v => v + ' Blocks'}
+                    formatter={(value, name) => [numberFormatText(value), name]}
+                  />
+                  <Legend />
+                  <Bar dataKey="total dump value" fill="#8884d8" />
+                  <Bar dataKey="total dump cost" fill="#82ca9d" />
+                </BarChart>
+                {/* <LiquidityChart
+                  tick={currTick}
+                  data={liquidityChartData}
+                  tickSpacing={TICK_SPACINGS[fee]}
+                  width={700}
+                  height= {260}
+                /> */}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleReportClose} variant="contained">Close</Button>
         </DialogActions>
       </Dialog>
     </Box>
