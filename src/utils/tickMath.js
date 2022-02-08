@@ -1,7 +1,7 @@
 // borrowed from @uniswap/v3-sdk
 
 import JSBI from "jsbi"
-import { constants } from "ethers"
+import { constants, BigNumber } from "ethers"
 
 const Q32 = JSBI.exponentiate(JSBI.BigInt(2), JSBI.BigInt(32))
 export const ZERO = JSBI.BigInt(0)
@@ -46,3 +46,46 @@ export const getSqrtRatioAtTick = (tick) => {
     ? JSBI.add(JSBI.divide(ratio, Q32), ONE).toString()
     : JSBI.divide(ratio, Q32).toString()
 }
+
+  
+export const getAmount0ForLiquidity = (sqrtRatioAX96, sqrtRatioBX96, liquidity) => {
+  sqrtRatioAX96 = BigNumber.from(sqrtRatioAX96);
+  sqrtRatioBX96 = BigNumber.from(sqrtRatioBX96);
+  if (sqrtRatioAX96.gt(sqrtRatioBX96)) [sqrtRatioAX96, sqrtRatioBX96] = [sqrtRatioBX96, sqrtRatioAX96];
+
+  return BigNumber.from(liquidity)
+                  .mul(BigNumber.from(2).pow(96))
+                  .mul(sqrtRatioBX96.sub(sqrtRatioAX96))
+                  .div(sqrtRatioBX96)
+                  .div(sqrtRatioAX96);
+};
+
+export const getAmount1ForLiquidity = (sqrtRatioAX96, sqrtRatioBX96, liquidity) => {
+  sqrtRatioAX96 = BigNumber.from(sqrtRatioAX96);
+  sqrtRatioBX96 = BigNumber.from(sqrtRatioBX96);
+  if (sqrtRatioAX96.gt(sqrtRatioBX96)) [sqrtRatioAX96, sqrtRatioBX96] = [sqrtRatioBX96, sqrtRatioAX96];
+
+  return BigNumber.from(liquidity)
+                  .mul(sqrtRatioBX96.sub(sqrtRatioAX96))
+                  .div('0x1000000000000000000000000')
+};
+
+export const getLiquidityForAmount0 = (sqrtRatioAX96, sqrtRatioBX96, amount0) => {
+  sqrtRatioAX96 = BigNumber.from(sqrtRatioAX96);
+  sqrtRatioBX96 = BigNumber.from(sqrtRatioBX96);
+  if (sqrtRatioAX96.gt(sqrtRatioBX96)) [sqrtRatioAX96, sqrtRatioBX96] = [sqrtRatioBX96, sqrtRatioAX96];
+  const intermediate = sqrtRatioAX96.mul(sqrtRatioBX96).div('0x1000000000000000000000000')
+  return BigNumber.from(amount0)
+                  .mul(intermediate)
+                  .div(sqrtRatioBX96.sub(sqrtRatioAX96));
+
+};
+
+export const getLiquidityForAmount1 = (sqrtRatioAX96, sqrtRatioBX96, amount1) => {
+  sqrtRatioAX96 = BigNumber.from(sqrtRatioAX96);
+  sqrtRatioBX96 = BigNumber.from(sqrtRatioBX96);
+  if (sqrtRatioAX96.gt(sqrtRatioBX96)) [sqrtRatioAX96, sqrtRatioBX96] = [sqrtRatioBX96, sqrtRatioAX96];
+  return BigNumber.from(amount1)
+                  .mul('0x1000000000000000000000000')
+                  .div(sqrtRatioBX96.sub(sqrtRatioAX96));
+};

@@ -1,9 +1,9 @@
-import { PriceImpact } from './components/PriceImpact';
+import { Main } from './components/Main';
 
 
 function App() {
   return (
-      <PriceImpact />
+      <Main />
   );
 }
 
