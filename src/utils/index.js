@@ -39,7 +39,9 @@ export const sqrtPriceX96ToPrice = (a, invert) => {
   a = BigNumber.from(a);
   a = a.mul(a).div(scale);
 
-  if (invert && !a.eq(0)) a = c1e18.mul(c1e18).div(a);
+  if (invert && a.eq(0)) return BigNumber.from(MAX_TICK_PRICE.toFixed(0)).mul(c1e18);
+
+  if (invert) a = c1e18.mul(c1e18).div(a);
   return a;
 };
 

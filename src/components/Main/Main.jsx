@@ -634,7 +634,7 @@ export const Main = () => {
     setLiquidityProfile(null);
     setLiquidityChartData(null);
     setLiquidityStats(null);
-    // setPoolFees([]);
+    setPoolFees([]);
   };
 
   const handleToken = (option) => {
