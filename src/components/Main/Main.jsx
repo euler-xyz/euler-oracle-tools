@@ -602,10 +602,10 @@ export const Main = () => {
     //   setLiquidityStats(stats);
     // })
 
-    // console.time("report");
-    // runReport();
-    setReportLoading(false);
-    setReportData(reportJson);
+    console.time("report");
+    runReport();
+    // setReportLoading(false);
+    // setReportData(reportJson);
   };
 
   const onMaxTwapTarget = (direction) => () => {
