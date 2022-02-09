@@ -183,14 +183,6 @@ export const Main = () => {
       ),
       getMarketConfig(USDC_ADDRESS),
     ]).then(([result1, result2, result3]) => {
-      result1.data.tokens.push({
-        "name": "Vader",
-        "address": "0x2602278EE1882889B946eb11DC0E810075650983",
-        "symbol": "VADER",
-        "decimals": 18,
-        "chainId": 1,
-        "logoURI": "https://assets.coingecko.com/coins/images/21975/small/gamma-token-200.png?1640566576"
-      },)
       setTokenList(sortBy(result1.data.tokens, "symbol"));
       setEthPrice(Number(result2.data.USD));
       setUsdcMarketConfig(result3);
