@@ -37,7 +37,7 @@ import { matchSorter } from "match-sorter";
 import { Decimal } from "decimal.js";
 import { utils } from "ethers";
 
-import reportJson from '../../report.json'
+// import reportJson from '../../report.json'
 
 import { PriceImpactChart } from "../PriceImpactChart";
 import { LiquidityReport } from "../LiquidityReport";
@@ -55,21 +55,17 @@ import {
   getTwapAfterAttack,
   getMinMaxTargetTwapSpot,
   getCostOfAttack,
-} from "../../utils";
-import { getPumpAndDump, binarySearchTradeValues } from "../../utils/trades";
-import {
+  getPumpAndDump,
+  binarySearchTradeValues,
   MAX_TICK_PRICE,
   MIN_TICK_PRICE,
   USDC_ADDRESS,
   WETH_ADDRESS,
-} from "../../utils/constants";
+  //   getLiquidityProfile,
+  //   getLiquidityStats,
+  //   parseLiquidityRange,
+} from "../../utils";
 
-// import {
-//   getLiquidityProfile,
-//   getLiquidityStats,
-//   parseLiquidityRange,
-// } from "../../utils/liquidityProfile";
-// import { LiquidityChart } from './LiquidityChart/LiquidityChart';
 
 export const Main = () => {
   const [tokenList, setTokenList] = useState([]);
@@ -426,8 +422,6 @@ export const Main = () => {
         1 / (reportCollateralFactor * usdcMarketConfig.borrowFactor) - 1;
       const breakEvenDumpTwapChange = breakEvenPumpTwapChange; // 1 / (reportBorrowFactor * usdcMarketConfig.collateralFactor) - 1;
 
-      const inverted = isInverted(token.address);
-
       let progress = 0;
       const attackBlocksReport = async (attackB) => {
         const p = utils.formatEther(currPrice);
@@ -636,7 +630,9 @@ export const Main = () => {
   };
 
   const handleFee = (event) => {
+    const fees = poolFees;
     resetMarket();
+    setPoolFees(fees);
     setFee(event.target.value);
   };
 

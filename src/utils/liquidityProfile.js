@@ -1,5 +1,5 @@
 import { utils } from "ethers";
-import { Decimal } from "decimals.js";
+import { Decimal } from "decimal.js";
 
 import { WETH_ADDRESS, TICK_SPACINGS } from "./constants";
 import { computeUniV3PoolAddress, formatPrice } from ".";
