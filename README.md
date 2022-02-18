@@ -1,4 +1,6 @@
-# Euler Oracle Tools
+# Uniswap Oracle Attack Simulator
+The tool calculates the cost to move a token's Uniswap v3 TWAP to x price, given its liquidity profile by binary searching trades on Uniswap QuoterV2 lens.
+Check out [this article](https://t.co/ripAfLvXGC) for details.
 
 ## Setup
 
