@@ -37,7 +37,7 @@ export const getDump = async (
     let quote;
 
     let amountIn = utils
-      .parseEther(String(tradeValueInUSD / ethPrice))
+      .parseEther(new Decimal(tradeValueInUSD / ethPrice).toFixed(18))
       .mul(c1e18)
       .div(currPrice);
     quote = await quoterContract.callStatic.quoteExactInputSingle({
@@ -83,7 +83,7 @@ export const getPump = async (
     let inverted = isInverted(token.address);
     let quote;
 
-    let amountIn = utils.parseEther(String(tradeValueInUSD / ethPrice));
+    let amountIn = utils.parseEther(new Decimal(tradeValueInUSD / ethPrice).toFixed(18));
     quote = await quoterContract.callStatic.quoteExactInputSingle({
       tokenIn: WETH_ADDRESS,
       tokenOut: token.address,
@@ -204,7 +204,7 @@ export const searchTrade = (
     });
 
     let i = 0;
-    while (high - low > high * tolerance) {
+    while (high - low > high * tolerance && high >= 100) {
       if (isCancelled) throw new Error("cancelled");
 
       let ticks = Array(ranges - 1)
