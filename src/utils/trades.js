@@ -29,7 +29,7 @@ export const getDump = async (
   ethPrice,
   tradeValueInUSD
 ) => {
-  if (token.address.toLowerCase() === WETH_ADDRESS || currPrice.eq(0))
+  if (token.address.toLowerCase() === WETH_ADDRESS)
     return { value: tradeValueInUSD, price: "0", priceImpact: "0" };
 
   try {
@@ -39,7 +39,7 @@ export const getDump = async (
     let amountIn = utils
       .parseEther(new Decimal(tradeValueInUSD / ethPrice).toFixed(18))
       .mul(c1e18)
-      .div(currPrice);
+      .div(currPrice.eq(0) ? 1 : currPrice);
     quote = await quoterContract.callStatic.quoteExactInputSingle({
       tokenIn: token.address,
       tokenOut: WETH_ADDRESS,
@@ -49,7 +49,7 @@ export const getDump = async (
     });
     let after = sqrtPriceX96ToPrice(quote.sqrtPriceX96After, inverted);
     const priceImpact = utils.formatEther(
-      after.sub(currPrice).mul(c1e18).div(currPrice).mul(100)
+      after.sub(currPrice).mul(c1e18).div(currPrice.eq(0) ? 1 : currPrice).mul(100)
     );
 
     return {
@@ -76,7 +76,7 @@ export const getPump = async (
   ethPrice,
   tradeValueInUSD
 ) => {
-  if (token.address.toLowerCase() === WETH_ADDRESS || currPrice.eq(0))
+  if (token.address.toLowerCase() === WETH_ADDRESS)
     return { value: tradeValueInUSD, price: "0", priceImpact: "0" };
 
   try {
@@ -95,7 +95,7 @@ export const getPump = async (
     let after = sqrtPriceX96ToPrice(quote.sqrtPriceX96After, inverted);
 
     const priceImpact = utils.formatEther(
-      after.sub(currPrice).mul(c1e18).div(currPrice).mul(100)
+      after.sub(currPrice).mul(c1e18).div(currPrice.eq(0) ? 1 : currPrice).mul(100)
     );
 
     return {

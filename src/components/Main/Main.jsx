@@ -225,7 +225,6 @@ export const Main = () => {
   useEffect(() => {
     if (!tokenList.length || !ethPrice || !currPrice || !poolFees.includes(fee))
       return;
-
     setTrades(null);
     Promise.all(
       amountsUSD.map((a) => getPumpAndDump(currPrice, token, fee, ethPrice, a))
@@ -237,7 +236,9 @@ export const Main = () => {
         });
       })
       .catch((e) => {
-        handleError("Failed to fetch quotes");
+        let reason = (e.reason === "AS" || e.reason === "SPL") ? ": no liquidity" : "";
+        if (e.reason === "TF") reason = ": transfer failed";
+        handleError("Failed to fetch quotes" + reason);
       });
   }, [
     tokenName,

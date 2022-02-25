@@ -39,7 +39,9 @@ export const sqrtPriceX96ToPrice = (a, invert) => {
   a = BigNumber.from(a);
   a = a.mul(a).div(scale);
 
-  if (invert && a.eq(0)) return BigNumber.from(MAX_TICK_PRICE.toFixed(0)).mul(c1e18);
+  if (invert && a.eq(0)) {
+    return BigNumber.from(MAX_TICK_PRICE.toFixed(0)).mul(c1e18);
+  }
 
   if (invert) a = c1e18.mul(c1e18).div(a);
   return a;
@@ -98,6 +100,7 @@ export const getTwapTargetRatio = (
   window,
   attackBlocks
 ) => {
+  if (currPrice.eq(0)) return new Decimal(0);
   const inverted = isInverted(token.address);
   let target = targetEthTwap;
 
@@ -198,7 +201,12 @@ export const getMarketConfig = async (underlyingAddress) => {
   };
 };
 
-export const getMinMaxTargetTwapSpot = (currPrice, attackBlocks, window, token) => {
+export const getMinMaxTargetTwapSpot = (
+  currPrice,
+  attackBlocks,
+  window,
+  token
+) => {
   const p = utils.formatEther(currPrice);
 
   let maxTargetTwapSpot = getTwapAfterAttack(
@@ -214,7 +222,7 @@ export const getMinMaxTargetTwapSpot = (currPrice, attackBlocks, window, token) 
     window,
     attackBlocks
   );
- 
+
   let minTargetTwapSpotPercentage = Decimal.sub(minTargetTwapSpot, p)
     .div(p)
     .mul(100)
@@ -238,7 +246,7 @@ export const getMinMaxTargetTwapSpot = (currPrice, attackBlocks, window, token) 
     minTargetTwapSpot,
     maxTargetTwapSpotPercentage,
     minTargetTwapSpotPercentage,
-  }
+  };
 };
 
 export const getCostOfAttack = (trade, currPrice, ethPrice, token) => {
