@@ -33,19 +33,19 @@ const eulerViewContract = new Contract(
 Decimal.set({ precision: 50 });
 
 export const sqrtPriceX96ToPrice = (a, invert) => {
-  const scale = BigNumber.from(2)
+  const scale = new Decimal(2)
     .pow(96 * 2)
-    .div(c1e18);
-  a = BigNumber.from(a);
-  a = a.mul(a).div(scale);
+    .div(new Decimal(10).pow(18))
+  a = new Decimal(a.toString())
+  a = a.mul(a).div(scale)
+  
+  if (invert && a.eq(0))
+    return BigNumber.from(MAX_TICK_PRICE.toFixed(0)).mul(c1e18)
 
-  if (invert && a.eq(0)) {
-    return BigNumber.from(MAX_TICK_PRICE.toFixed(0)).mul(c1e18);
-  }
+  if (invert) a = new Decimal(10).pow(18).mul(new Decimal(10).pow(18)).div(a)
 
-  if (invert) a = c1e18.mul(c1e18).div(a);
-  return a;
-};
+  return BigNumber.from(a.toFixed(0))
+}
 
 // a is decimal
 export const priceToSqrtX96Price = (a) => {
