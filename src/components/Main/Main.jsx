@@ -177,11 +177,12 @@ export const Main = () => {
       axios.get(
         `https://min-api.cryptocompare.com/data/price?fsym=ETH&tsyms=USD`
       ),
-      getMarketConfig(USDC_ADDRESS),
+      // getMarketConfig(USDC_ADDRESS),
     ]).then(([result1, result2, result3]) => {
       setTokenList(sortBy(result1.data.tokens, "symbol"));
       setEthPrice(Number(result2.data.USD));
-      setUsdcMarketConfig(result3);
+      // setUsdcMarketConfig(result3);
+      setUsdcMarketConfig({ borrowFactor: 0.95 });
     });
   }, []);
 
